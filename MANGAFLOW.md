@@ -1,7 +1,7 @@
 # MANGAFLOW — Project Reference, Code Map & Build History
 *GitHub repo: https://github.com/DHARMAdr/Mangat0 · Site: https://dharmadr.github.io/Mangat0/*
 *Cloudflare Workers: `worker.js` (page/image proxy) and `accounts-worker.js` (cloud profiles, D1 database)*
-*Last updated: Round 44 — 2026-11-08 · Only HTML, CSS and JavaScript are used (no build step, no frameworks).*
+*Last updated: Round 45 — 2026-11-09 · Only HTML, CSS and JavaScript are used (no build step, no frameworks).*
 
 > This ONE file replaces every older copy. It has (1) the page naming we use, (2) what every file is for, (3) for every part of every file **why it exists / how it works / how it can be improved**, (4) the complete history up to the latest round, (5) how to continue with Claude.
 
@@ -130,6 +130,12 @@ Head: CSP, `boot.js`, `style.css?v=44`. Body: `#browser` (navbar, start page, `#
 6. Cache-busting number 43 → 44; this document rewritten.
 
 Tests used: Playwright with mocked proxies (Pixel 7 and iPhone 13 emulation, Asia/Kolkata time zone).
+
+## 4b. Round 45 — Chapter errors from the 2026-11-09 reports (app.js, index.html `?v=45`)
+
+1. **roliascan.com "LOCKED or REMOVED" (Fist Demon of Mount Hua, ch 57).** The "lock" words were only the site's hidden placeholder ("Loading chapter… not available anymore") and its log-in pop-up. The real chapter is open: the pictures are filled in by the site's own script, but its preview picture is `…/0002.webp`. `probeNumbered()` always started at 0001 and stopped at the first missing number, so it found nothing. NOW it asks for 0, 1 and the sample together and starts at the lowest that exists. `noImagesError()` also stops saying LOCKED when the page has real previous/next links and no log-in/coins/premium words.
+2. **arenascan.com "no images found" (Chapter 42).** The site answered the chapter address with ANOTHER series' page (the report shows a different title and 8 chapters), then MangaFlow read that wrong page. NOW `sentOtherPage()` compares the page's canonical address with the one asked for; on a mismatch the chapter is requested once more with a harmless `?mf=<time>` cache-buster, and if it is still wrong the message says plainly "the site answered with a DIFFERENT page", with both addresses in the details.
+3. Not verified on the live sites (my workspace cannot open them); verified with mock copies of both pages. If a chapter still fails, send the new report — the details now include the asked and received addresses.
 
 ### Open items (not changed)
 - Bookmark deleted in profile can reappear from the cloud until the next state push (push right after delete).
