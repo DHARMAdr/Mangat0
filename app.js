@@ -3287,11 +3287,19 @@
       const make = n => pre + String(n).padStart(width, '0') + ext + q;
       // WHY: Check the idea first. HOW: if neither page 1 nor the sample exists, the numbering does not hold; go to the next
       // sample.
-      if (!(await imgExists(make(1), ref)) && !(await imgExists(sample, ref))) continue;   // the pattern does not hold
+      // ROUND 45 FIX (roliascan.com, report 2026-11-09): the site's preview picture is page "0002", and page "0001" may not exist
+      //   (or may be refused). The old loop always began at 1 and stopped at the first missing number, so it found NOTHING and the
+      //   page was wrongly called LOCKED. HOW NOW: ask for the sample and for the numbers 0 and 1 together; the run starts at the
+      //   LOWEST number that answers (0, 1 or the sample's own number), so "0002, 0003, 0004 ..." works too. IMPROVE: remember
+      //   the start number per site.
+      const firstN = parseInt(digits, 10);
+      const [has0, has1, hasS] = await Promise.all([imgExists(make(0), ref), imgExists(make(1), ref), imgExists(sample, ref)]);
+      if (!has0 && !has1 && !hasS) continue;   // the pattern does not hold
+      const startN = has0 ? 0 : has1 ? 1 : firstN;
       // WHY: Result list of found pages. HOW: starts empty.
       const list = [];
       // WHY: Test pages in groups of 6 up to 300, which is faster than one by one. HOW: n jumps by 6.
-      for (let n = 1; n <= 300; n += 6) {
+      for (let n = startN; n <= 300; n += 6) {
         // WHY: Make the numbers of this group. HOW: fill an array with n to n+5.
         const group = []; for (let k = n; k < n + 6; k++) group.push(k);
         // WHY: Test the 6 pages at the same time. HOW: Promise.all waits for all answers.
@@ -3464,13 +3472,38 @@
   const LOCK_RE = /(?:please\s+)?log\s*in\s+to\s+(?:read|unlock|view|continue)|unlock\s+(?:this\s+)?chapter|(?:chapter|content)\s+is\s+locked|premium\s+(?:only|chapter|members?)|members?\s+only|(?:coins?|points?)\s+(?:required|needed)|sign\s*in\s+to\s+read|not\s+available\s+anymore|has\s+been\s+removed/i;
   // WHY: Make a helpful error when no pictures exist. HOW: read the MAIN text of the page and choose a message. IMPROVE: translate
   // messages.
-  function noImagesError(doc, base, kind) {
+  // ROUND 45 (arenascan.com, report 2026-11-09). WHY: some sites (WordPress) answer an unknown or old chapter address with ANOTHER series' page
+  //   (the nearest guess). MangaFlow then read the wrong page's menu (8 chapters of a different manga) and said "no images found".
+  //   HOW: compare the page's own canonical/og:url with the address we asked for. If the last folder name differs and neither address
+  //   contains the other, the site sent a different page. Returns the canonical address, or '' when all is fine. IMPROVE: also compare titles.
+  function sentOtherPage(doc, base, ref) {
+    try {
+      const l = doc.querySelector('link[rel="canonical"][href]') || doc.querySelector('meta[property="og:url"][content]');
+      const c = l && (l.getAttribute('href') || l.getAttribute('content')); if (!c) return '';
+      const cp = new URL(c, base).pathname.replace(/\/+$/, ''), rp = new URL(ref).pathname.replace(/\/+$/, '');
+      if (cp.length < 2 || cp === rp || cp.startsWith(rp + '/') || rp.startsWith(cp + '/')) return '';
+      return cp.split('/').pop() !== rp.split('/').pop() ? new URL(c, base).href : '';
+    } catch { return ''; }
+  }
+  function noImagesError(doc, base, kind, ref) {
+    // ROUND 45: tell the truth when the site answered with a different page.
+    const other = ref ? sentOtherPage(doc, base, ref) : '';
+    if (other) { const e = new Error('The site answered with a DIFFERENT page (' + other + ') instead of this chapter address, so there was nothing to read. The chapter address may be old or wrong — open the manga page and choose the chapter again, or press Retry.'); e.details = 'Asked for: ' + ref + '\nGot (canonical): ' + other + '\n\n' + diagnose(doc, base); return e; }
     // WHY: Get the text that belongs to the page itself (round 28: not the menus and comments). HOW: mainText.
     const text = mainText(doc);
     // ROUND 30: the site sent the manga's MAIN PAGE instead of the chapter (see wrongPage). HOW: its own sentence; the report (details) still says what the page contained.
     if (kind === 'series') { const e = new Error('The site sent the manga\'s MAIN PAGE (series page) instead of this chapter, so there is nothing to show. The chapter may be locked, removed or need a login. MangaFlow does not show the main page\'s pictures as a chapter.'); e.details = diagnose(doc, base); return e; }
     // WHY: Create the error with the right message. HOW: if the text matches LOCK_RE, say locked or removed; else the plain
     // message.
+    // ROUND 45 (roliascan.com): the page's own HIDDEN placeholder text ("Loading chapter... This content is not available anymore") and its log-in pop-up matched the
+    //   lock words although the chapter was open to everyone. HOW: when the page has real previous/next chapter links and the text has NO log-in / coins / premium words (only the
+    //   "not available anymore" placeholder), the honest answer is "the site's own script fills in the pictures", not LOCKED. IMPROVE: read the placeholder's visibility.
+    let navOk = false; try { const nv = findNavLinks(doc, base, ref || base); navOk = !!(nv.prev || nv.next); } catch {}
+    const hardLock = /log\s*in\s+to\s+(?:read|unlock|view|continue)|unlock\s+(?:this\s+)?chapter|(?:chapter|content)\s+is\s+locked|premium|members?\s+only|coins?\s+(?:required|needed)|sign\s*in\s+to\s+read/i.test(text);
+    if (navOk && !hardLock && LOCK_RE.test(text)) {
+      const e2 = new Error('This site fills in its pictures with its own script (the page only says "Loading chapter…"), and MangaFlow could not find them next to the preview picture. It may be a temporary site problem — press Retry, or use "Open on the site".');
+      e2.details = diagnose(doc, base); return e2;
+    }
     const err = new Error(LOCK_RE.test(text)
       ? 'This chapter may be LOCKED or REMOVED (the page asks for a login / coins / premium, or says it is not available any more). MangaFlow cannot log in for you.'
       : 'no images found on this chapter page');
@@ -3968,7 +4001,17 @@
       if (gen !== R.gen || sec._fillTok !== tok) return;
       const imgs = found.list;
       // WHY: Explain the failure. HOW: throw noImagesError.
-      if (!imgs.length) throw noImagesError(doc, base, found.rejected);   // says WHY (locked / removed / script-built / main page instead; round 30) and carries a report
+      if (!imgs.length) {
+        // ROUND 45: when the site sent ANOTHER series' page, ask once more with a harmless cache-buster (a stale/wrong cached answer is the usual cause) before giving up.
+        if (sentOtherPage(doc, base, ch.url)) {
+          try {
+            const again = await fetchDoc(ch.url + (ch.url.includes('?') ? '&' : '?') + 'mf=' + Date.now());
+            if (gen !== R.gen || sec._fillTok !== tok) return;
+            if (!sentOtherPage(again.doc, again.base, ch.url)) { const f2 = await chapterPictures(again.doc, again.base, ch.url); if (f2.list.length) { Object.assign(found, f2); imgs.push(...f2.list); } }
+          } catch { /* the first answer stays */ }
+        }
+        if (!imgs.length) throw noImagesError(doc, base, found.rejected, ch.url);   // says WHY (locked / removed / script-built / main page / wrong page instead) and carries a report
+      }   // says WHY (locked / removed / script-built / main page instead; round 30) and carries a report
       // WHY: PDF download needs them. HOW: store on the box.
       sec._imgs = imgs;                               // remembered for the PDF download (original picture addresses)
       // List incomplete? The page's "Next" link adds the following chapter (only ever to the end of the list).
@@ -5550,7 +5593,7 @@
         if (imgs.length) return imgs;
         // WHY: remember why this try failed. HOW: stores an error in last. The catch below stores thrown errors; after two tries
         // the last error is thrown. IMPROVE: none needed.
-        last = found.rejected ? noImagesError(doc, base, found.rejected) : new Error('no pictures found');   // round 30: say WHY when the page was a login wall or the main page
+        last = found.rejected ? noImagesError(doc, base, found.rejected, it.url) : new Error('no pictures found');   // round 30: say WHY when the page was a login wall or the main page
       } catch (e) { last = e; }
     }
     // WHY: both tries failed. HOW: throw the last error so the caller reports it.
