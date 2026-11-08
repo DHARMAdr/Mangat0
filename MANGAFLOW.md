@@ -1,7 +1,7 @@
 # MANGAFLOW — Project Reference, Code Map & Build History
 *GitHub repo: https://github.com/DHARMAdr/Mangat0 · Site: https://dharmadr.github.io/Mangat0/*
 *Cloudflare Workers: `worker.js` (page/image proxy) and `accounts-worker.js` (cloud profiles, D1 database)*
-*Last updated: Round 45 — 2026-11-09 · Only HTML, CSS and JavaScript are used (no build step, no frameworks).*
+*Last updated: Round 46 — 2026-11-09 · Only HTML, CSS and JavaScript are used (no build step, no frameworks).*
 
 > This ONE file replaces every older copy. It has (1) the page naming we use, (2) what every file is for, (3) for every part of every file **why it exists / how it works / how it can be improved**, (4) the complete history up to the latest round, (5) how to continue with Claude.
 
@@ -136,6 +136,22 @@ Tests used: Playwright with mocked proxies (Pixel 7 and iPhone 13 emulation, Asi
 1. **roliascan.com "LOCKED or REMOVED" (Fist Demon of Mount Hua, ch 57).** The "lock" words were only the site's hidden placeholder ("Loading chapter… not available anymore") and its log-in pop-up. The real chapter is open: the pictures are filled in by the site's own script, but its preview picture is `…/0002.webp`. `probeNumbered()` always started at 0001 and stopped at the first missing number, so it found nothing. NOW it asks for 0, 1 and the sample together and starts at the lowest that exists. `noImagesError()` also stops saying LOCKED when the page has real previous/next links and no log-in/coins/premium words.
 2. **arenascan.com "no images found" (Chapter 42).** The site answered the chapter address with ANOTHER series' page (the report shows a different title and 8 chapters), then MangaFlow read that wrong page. NOW `sentOtherPage()` compares the page's canonical address with the one asked for; on a mismatch the chapter is requested once more with a harmless `?mf=<time>` cache-buster, and if it is still wrong the message says plainly "the site answered with a DIFFERENT page", with both addresses in the details.
 3. Not verified on the live sites (my workspace cannot open them); verified with mock copies of both pages. If a chapter still fails, send the new report — the details now include the asked and received addresses.
+
+## 4c. Round 46 — Refresh/Home address bug + roliascan picture API (app.js, index.html `?v=46`)
+
+1. **Refresh on the home page jumped back into reading mode; the address after Home was not clean.** ROOT CAUSE: a link such as `/Mangat0/?url=https://site/chapter` is meant to open once, but `rememberView()`, `rememberChapter()` and the failure clean-up all copied `location.search`, so `?url=` stayed in the address for ever. At the next start-up `?url=` was read first, opened as a user action (= reading mode) and even blocked the `#r=`/`#p=` memory. FIX: `cleanSearch()` (section 18a) removes `url` and `q` from every address write; start-up lets a saved `#r=/#p=/#q=` win over `?url=/?q=` and strips `?url=/?q=` at once with `replaceState`; `rememberChapter()` writes only while reading mode is on screen. RESULT (tested): reading → refresh = reading; Home → address is just `/Mangat0/`; refresh = Page 1; Page 2 refresh = Page 2.
+2. **roliascan.com: pictures never found (3rd report).** The page is script-built ("Loading chapter…"). Round 45 fixed the numbered-picture start; this round adds `apiPictures()`: it reads the site's own chapter script through the proxy, looks for `/api/…`, `/ajax/…`, `fetch("…")` addresses, adds the ids found in the chapter address (361460) and preview-picture folder (361395), tries them plus common shapes, and takes the first JSON answer holding 2+ picture addresses. Every step is written to `picTrace` and printed in the error report under "Steps tried to find the pictures". HONEST LIMIT: I cannot open roliascan from my workspace, so this was proven with a mock site, not the real one. If it still fails, the new report lists what each address answered, which decides the next fix.
+
+### Regression guard — fixed problems that must never come back
+| Problem | Rule that prevents it |
+|---|---|
+| Home / refresh reopens reading mode | Never copy `?url=`/`?q=` into later addresses (`cleanSearch()`); hash memory beats `?url=`; write `#r=` only while `reader` is visible; `leaveReader()` clears the save timer. |
+| Header/buttons cover Page 2 | `p2ScrollHook()` + `body.p2-hide`; keep the 450 ms lock. |
+| Date filter dead on phones | Date inputs need explicit colours; update only `#mfpHistList`; ignore backdrop taps within 800 ms of a date change. |
+| Phone shows old code | Bump every `?v=NN` in `index.html` on EVERY change (now 46). |
+| False "LOCKED" | Lock words are only trusted when there are no real prev/next links or the text has log-in/coins/premium wording. |
+| Numbered pictures start at 0002 | Probe 0, 1 and the sample; start at the lowest that exists. |
+| Wrong series page from site | Compare canonical address; one cache-busted retry; honest message. |
 
 ### Open items (not changed)
 - Bookmark deleted in profile can reappear from the cloud until the next state push (push right after delete).

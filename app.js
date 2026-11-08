@@ -3241,6 +3241,7 @@
   }
   // WHY: Check if a picture address really gives a picture. HOW: first try an <img> tag, then your own proxy. IMPROVE: use
   // a HEAD request to save data.
+  const picTrace = [];                  // ROUND 46: a short diary of every step tried to find a chapter's pictures; printed in the error report
   function imgExists(src, ref) {                                       // does this picture address answer with a real picture?
     // WHY: Test by loading the picture like a browser would. HOW: wrap an Image load in a Promise (a value that arrives
     // later).
@@ -3265,10 +3266,10 @@
         // the chapter address.
         const r = await fetch(own.replace('{url}', encodeURIComponent(src)) + (ref ? '&ref=' + encodeURIComponent(ref) : ''), { referrerPolicy: 'no-referrer', credentials: 'omit' });
         // WHY: A bad status means no picture. HOW: return false.
-        if (!r.ok) return false;
+        if (!r.ok) { imgExists.why = 'HTTP ' + r.status; return false; }   // ROUND 46: remembered for the error report
         // WHY: Tiny answers are error pages. HOW: the picture counts only if the data is over 1500 bytes.
-        return (await r.blob()).size > 1500;
-      } catch { return false; }
+        const bl = await r.blob(); if (bl.size <= 1500) imgExists.why = 'tiny answer (' + bl.size + ' bytes, ' + (r.headers.get('content-type') || '?') + ')'; return bl.size > 1500;
+      } catch (e) { imgExists.why = 'failed: ' + (e && e.message); return false; }
     };
     // WHY: Run the two ways in order. HOW: use the tag test, and only if it failed try the proxy.
     return viaTag().then(ok => ok || viaProxy());
@@ -3294,6 +3295,7 @@
       //   the start number per site.
       const firstN = parseInt(digits, 10);
       const [has0, has1, hasS] = await Promise.all([imgExists(make(0), ref), imgExists(make(1), ref), imgExists(sample, ref)]);
+      picTrace.push('numbered pictures: sample ' + sample + ' -> number 0: ' + has0 + ', number 1: ' + has1 + ', the sample itself: ' + hasS + (imgExists.why ? ' | last proxy answer: ' + imgExists.why : ''));
       if (!has0 && !has1 && !hasS) continue;   // the pattern does not hold
       const startN = has0 ? 0 : has1 ? 1 : firstN;
       // WHY: Result list of found pages. HOW: starts empty.
@@ -3385,7 +3387,14 @@
     let list = sc.list.slice(), how = sc.how;
     const total = list.length + sc.holders;
     // WHY: nothing at all in the page. HOW: the numbered-preview way of round 10 (pictures next to the og:image picture).
-    if (!list.length) { const p = await probeNumbered(doc, base, ref); return { list: p, total: p.length, partial: false, sealed, how: p.length ? 'numbered preview picture' : 'none', scan: sc }; }
+    if (!list.length) {
+      picTrace.length = 0;
+      const p = await probeNumbered(doc, base, ref);
+      if (p.length) return { list: p, total: p.length, partial: false, sealed, how: 'numbered preview picture', scan: sc };
+      // ROUND 46: last resort for script-built readers (roliascan.com): read the site's own chapter script and ask the picture API it uses.
+      const a = await apiPictures(doc, base, ref);
+      return { list: a, total: a.length, partial: false, sealed, how: a.length ? 'the site\'s own picture API' : 'none', scan: sc };
+    }
     // WHY: every slot has its address, or (round 28) one single odd empty slot sits among 5 or more real pictures (an ad box, a spacer): not worth a warning. HOW: nothing more to do.
     if (!sc.holders || (sc.holders === 1 && list.length >= 5)) return { list, total, partial: false, sealed, how, scan: sc };
     // 1) the page text and 2) the scripts. A list is taken only when it is longer AND it contains the first picture (or is complete), so unrelated pictures never join.
@@ -3472,6 +3481,74 @@
   const LOCK_RE = /(?:please\s+)?log\s*in\s+to\s+(?:read|unlock|view|continue)|unlock\s+(?:this\s+)?chapter|(?:chapter|content)\s+is\s+locked|premium\s+(?:only|chapter|members?)|members?\s+only|(?:coins?|points?)\s+(?:required|needed)|sign\s*in\s+to\s+read|not\s+available\s+anymore|has\s+been\s+removed/i;
   // WHY: Make a helpful error when no pictures exist. HOW: read the MAIN text of the page and choose a message. IMPROVE: translate
   // messages.
+  /* ROUND 46 — SCRIPT-BUILT READERS: ASK THE SITE'S OWN PICTURE API (roliascan.com and similar)
+     WHY: some readers (the page only says "Loading chapter...") get their picture list from a small JSON address that their own script calls after the page opens.
+          MangaFlow never runs the site's scripts, so the list never arrived, and guessing 0001.webp, 0002.webp ... next to the preview picture is not always possible
+          (the picture host may refuse strangers or number the files differently). Reading the SAME public JSON the site's script reads is not breaking anything: it is the
+          address the page itself uses for every visitor.
+     HOW: 1) numbers that look like ids in the chapter address (".../ch57-361460/" -> 361460) and in the preview picture folder ("manhwa_361395_57" -> 361395);
+          2) the site's own script files (same host, not analytics) are downloaded through the proxy and searched for quoted addresses that start with /api/, /ajax/, /wp-json/
+             (and fetch("...") calls); an address ending in "/" or "=" or containing {id} / ${...} / :id gets the id put in;
+          3) plus a short list of very common shapes (/api/chapters/<id>, /api/chapter/<id>, /api/reader/<id>, /ajax/chapter/<id> ...);
+          4) every candidate is fetched (at most 30, one after the other); an answer that is JSON (or text) holding 2 or more picture addresses wins. Relative addresses are made full.
+          Every step is written into picTrace, which noImagesError() puts in the error report ("Steps tried"), so a failure says exactly what each address answered.
+     LIMITS: needs the answers to be public (no cookie, no token). If the site wants a login the candidates answer 401/403 and the report shows it.
+     IMPROVE: remember the working address per site; also read data-* ids from the page; send the chapter address as Referer through the own proxy. */
+  async function apiPictures(doc, base, ref) {
+    const out = [];
+    let host = ''; try { host = new URL(ref).hostname.replace(/^www\./, ''); } catch { return out; }
+    const origin = new URL(ref).origin;
+    // 1) ids
+    const ids = []; const addId = v => { if (v && !ids.includes(v)) ids.push(v); };
+    try { (decodeURIComponent(new URL(ref).pathname).match(/\d{4,}/g) || []).reverse().forEach(addId); } catch { /* no ids */ }
+    metaImageSamples(doc, base).forEach(u => (u.match(/(?:^|[/_-])(\d{4,})(?=[/_-])/g) || []).forEach(x => addId(x.replace(/\D/g, ''))));
+    picTrace.push('picture API: ids found in the address / preview picture: ' + (ids.join(', ') || 'none'));
+    if (!ids.length) return out;
+    // 2) the site's own scripts
+    const scripts = Array.from(doc.querySelectorAll('script[src]')).map(x => absUrl(x.getAttribute('src'), base)).filter(u => u && (() => { try { const h = new URL(u).hostname.replace(/^www\./, ''); return h === host || h.endsWith('.' + host); } catch { return false; } })() && !/google|gtag|analytics|jquery|adsbygoogle/i.test(u));
+    scripts.sort((a, b) => (/chapter|read|app|main/i.test(b) ? 1 : 0) - (/chapter|read|app|main/i.test(a) ? 1 : 0));
+    const found = [];
+    for (const su of scripts.slice(0, 4)) {
+      try {
+        const js = await fetchRaw(su);
+        const re = /["'`]((?:\/|https?:\/\/[^"'`\s]+?\/)(?:api|ajax|wp-json|content\/api)[^"'`\s]{1,140})["'`]/gi; let m, n = 0;
+        while ((m = re.exec(js)) && n < 12) { if (!found.includes(m[1])) { found.push(m[1]); n++; } }
+        const re2 = /fetch\(\s*["'`]([^"'`]{3,160})["'`]/g; while ((m = re2.exec(js)) && n < 20) { if (!found.includes(m[1]) && /^(?:\/|https?:)/.test(m[1])) { found.push(m[1]); n++; } }
+        picTrace.push('picture API: read script ' + su.split('/').pop().slice(0, 40) + ' (' + js.length + ' chars) -> ' + n + ' address(es) that look like an API');
+      } catch (e) { picTrace.push('picture API: could not read script ' + su.split('/').pop().slice(0, 40) + ' (' + ((e && e.errors && e.errors[0] && e.errors[0].message) || (e && e.message) || 'error') + ')'); }
+    }
+    // 3) candidates
+    const cands = [];
+    const put = u => { const a = absUrl(u, origin + '/'); if (a && /^https?:/i.test(a) && !cands.includes(a)) cands.push(a); };
+    found.forEach(f => ids.slice(0, 2).forEach(id => {
+      let u = f.replace(/\$\{[^}]*\}|\{\{?[^}]*\}?\}|:id\b|\[id\]/gi, id);
+      if (u === f) { if (/[/=]$/.test(u)) u += id; else if (/\?[^=]*$/.test(u)) return; else if (!/\d{4,}/.test(u) && /chapter|page|image|reader/i.test(u)) u += (u.includes('?') ? '&id=' : '/') + id; else return; }
+      put(u);
+    }));
+    ids.slice(0, 2).forEach(id => ['/api/chapters/' + id, '/api/chapter/' + id, '/api/reader/' + id, '/api/chapters/' + id + '/pages', '/api/chapter/' + id + '/pages', '/ajax/chapter/' + id, '/api/chapter?id=' + id].forEach(put));
+    picTrace.push('picture API: ' + cands.length + ' address(es) to try');
+    // 4) try them
+    const picsIn = (x, acc) => {
+      if (typeof x === 'string') { const a = absUrl(x.replace(/\\\//g, '/'), origin + '/'); if (a && IMG_EXT.test(a) && !BAD_IMG.test(a) && !acc.includes(a)) acc.push(a); }
+      else if (Array.isArray(x)) x.forEach(v => picsIn(v, acc));
+      else if (x && typeof x === 'object') Object.keys(x).forEach(k => picsIn(x[k], acc));
+      return acc;
+    };
+    for (const c of cands.slice(0, 30)) {
+      try {
+        const txt = await fetchRaw(c);
+        let pics = [];
+        try { pics = picsIn(JSON.parse(txt), []); } catch { /* not JSON: look in the text */ }
+        if (pics.length < 2) { const mm = unescapeJs(txt).match(/(?:https?:)?\/\/[^"'\s<>\\)]+?\.(?:jpe?g|png|webp|avif|gif)(?:\?[^"'\s<>\\)]*)?/gi) || []; pics = mm.map(u => absUrl(u, origin + '/')).filter(u => u && !BAD_IMG.test(u)).filter((u, i, a) => a.indexOf(u) === i); }
+        picTrace.push('picture API: ' + c.replace(origin, '').slice(0, 90) + ' -> ' + txt.length + ' chars, ' + pics.length + ' picture address(es)');
+        if (pics.length >= 2) {
+          if (pics.every(u => NUM_IMG.test(u))) pics.sort((a, b) => +NUM_IMG.exec(a)[2] - +NUM_IMG.exec(b)[2]);
+          return pics;
+        }
+      } catch (e) { picTrace.push('picture API: ' + c.replace(origin, '').slice(0, 90) + ' -> ' + ((e && e.errors && e.errors[0] && e.errors[0].message) || (e && e.message) || 'failed')); }
+    }
+    return out;
+  }
   // ROUND 45 (arenascan.com, report 2026-11-09). WHY: some sites (WordPress) answer an unknown or old chapter address with ANOTHER series' page
   //   (the nearest guess). MangaFlow then read the wrong page's menu (8 chapters of a different manga) and said "no images found".
   //   HOW: compare the page's own canonical/og:url with the address we asked for. If the last folder name differs and neither address
@@ -3502,14 +3579,14 @@
     const hardLock = /log\s*in\s+to\s+(?:read|unlock|view|continue)|unlock\s+(?:this\s+)?chapter|(?:chapter|content)\s+is\s+locked|premium|members?\s+only|coins?\s+(?:required|needed)|sign\s*in\s+to\s+read/i.test(text);
     if (navOk && !hardLock && LOCK_RE.test(text)) {
       const e2 = new Error('This site fills in its pictures with its own script (the page only says "Loading chapter…"), and MangaFlow could not find them next to the preview picture. It may be a temporary site problem — press Retry, or use "Open on the site".');
-      e2.details = diagnose(doc, base); return e2;
+      e2.details = diagnose(doc, base) + (picTrace.length ? '\n\nSteps tried to find the pictures (round 46):\n' + picTrace.join('\n') : ''); return e2;
     }
     const err = new Error(LOCK_RE.test(text)
       ? 'This chapter may be LOCKED or REMOVED (the page asks for a login / coins / premium, or says it is not available any more). MangaFlow cannot log in for you.'
       : 'no images found on this chapter page');
     // WHY: Attach a report of what the page held, for the user to send. HOW: diagnose() builds it and it is stored on
     // err.details.
-    err.details = diagnose(doc, base);
+    err.details = diagnose(doc, base) + (picTrace.length ? '\n\nSteps tried to find the pictures (round 46):\n' + picTrace.join('\n') : '');
     // WHY: Return the error so the caller can throw it. HOW: return err.
     return err;
   }
@@ -4699,9 +4776,10 @@
     // ROUND 39: `push` (true only when the chapter actually changed, or when reading mode just started — never for
     //   the plain "still on the same chapter" keep-alive save) adds a real Back/Forward step. See rememberView above
     //   for the full explanation.
-    if (!settings.noHistory) {
-      const hash = '#r=' + encodeURIComponent(ch.url), full = location.pathname + location.search + hash;
-      const changed = full !== (location.pathname + location.search + location.hash);
+    // ROUND 46: the address is written ONLY while reading mode is really on screen (a late timer after Home must never put #r= back), and an old ?url= is never kept.
+    if (!settings.noHistory && !reader.hidden) {
+      const hash = '#r=' + encodeURIComponent(ch.url), full = location.pathname + cleanSearch() + hash;
+      const changed = full !== (location.pathname + cleanSearch() + location.hash);
       try { if (push && !suppressPush && changed) history.pushState(null, '', full); else history.replaceState(null, '', full); } catch { /* address bar not writable: fine */ }
     }
     saveRead({
@@ -6794,12 +6872,23 @@
   //   from pushing ANOTHER entry (which would otherwise fight with Back/Forward and break the stack).
   // IMPROVE: also remember and restore the exact scroll position, not just which chapter/page.
   let suppressPush = false;
+  // ROUND 46 — THE "?url=" THAT NEVER LEAVES (the real reason a refresh on the home page jumped back into reading mode, and why the address
+  //   did not look clean after pressing Home).
+  // WHY: a link like https://dharmadr.github.io/Mangat0/?url=https://site/chapter-2 opens that page once. But every later address write
+  //   (rememberView / rememberChapter / goHome) copied location.search, so "?url=..." stayed in the address for ever. On the next refresh
+  //   start-up saw "?url=" first, opened THAT page again as a user action (which jumps into reading mode) and even ignored the #r= / #p=
+  //   memory. HOW: cleanSearch() returns the current "?..." part WITHOUT the url and q values (other values, if any, are kept). Every
+  //   address write now uses it, so after the first page opens the address is only  /Mangat0/#r=...  (reading), /Mangat0/#p=... (a site page)
+  //   or just /Mangat0/ (home). IMPROVE: if more MangaFlow-only query values are added later, list them here.
+  function cleanSearch() {
+    try { const sp = new URLSearchParams(location.search); sp.delete('url'); sp.delete('q'); const t = sp.toString(); return t ? '?' + t : ''; } catch { return ''; }
+  }
   function rememberView(kind, value, push) {
     if (kind && value) lastView = { k: kind, v: value };
     if (settings.noHistory) return;                       // "Do not save my reading history" also means: no address-bar memory
     const hash = (kind && value ? '#' + kind + '=' + encodeURIComponent(value) : '');
-    const full = location.pathname + location.search + hash;
-    const changed = full !== (location.pathname + location.search + location.hash);
+    const full = location.pathname + cleanSearch() + hash;
+    const changed = full !== (location.pathname + cleanSearch() + location.hash);   // ROUND 46: a leftover ?url= is stripped with replaceState, never pushed
     try {
       if (push && !suppressPush && changed) history.pushState(null, '', full);
       else history.replaceState(null, '', full);
@@ -7088,8 +7177,12 @@
   updateNav();
   // WHY: Support links like ?url=... that open a manga directly. HOW: URLSearchParams reads the url value; if present
   // navigate opens it as a user action. IMPROVE: validate the address first.
-  const qs = new URLSearchParams(location.search).get('url');
-  const qq = new URLSearchParams(location.search).get('q');                 // ROUND 22: a new tab opened from a search link: ?q=<words> = run it in OUR search
+  // ROUND 46: a saved place in the address (#r= / #p= / #q=) is where the person WAS when they refreshed, so it wins over ?url= / ?q= (those only come from a shared link and are
+  //   used once). Then ?url= / ?q= are removed from the address at once (replaceState, no new history entry) so a later refresh or Home can never open them again.
+  const hasSaved = /^#[rpq]=./.test(location.hash);
+  const qs = hasSaved ? null : new URLSearchParams(location.search).get('url');
+  const qq = hasSaved ? null : new URLSearchParams(location.search).get('q');
+  try { if (/[?&](url|q)=/.test(location.search)) history.replaceState(null, '', location.pathname + cleanSearch() + location.hash); } catch { /* address bar not writable: fine */ }                 // ROUND 22: a new tab opened from a search link: ?q=<words> = run it in OUR search
   if (qs) navigate(qs, true, { user: true }).then(endResume, endResume); else if (qq) navigate(qq, true, { user: false }).then(endResume, endResume);   // round 29a: the cover goes away when this is done (or failed)
   /* RESUME AFTER A REFRESH (round 9b): the address ends in #r=<chapter link> while you read. Open that chapter in reading mode again.
      If it cannot be loaded (offline, proxy down) the start page stays and the broken #r= is removed, so you are never stuck. */
@@ -7128,7 +7221,7 @@
     const ok = await navigate(url, true, { user: false });
     step = 'starting reading mode (chapter list and first pictures)';
     if (ok && cur && sameUrl(cur.url, url)) { if (!(await startReading({ quiet: true }))) toast('Could not resume reading. Press "Reading mode".'); }
-    else { try { history.replaceState(null, '', location.pathname + location.search); } catch { /* ignore */ } }
+    else { try { history.replaceState(null, '', location.pathname + cleanSearch()); } catch { /* ignore */ } }
     } finally { clearTimeout(dog); endResume(); }                // round 29a (round 30: the slow-reopen timer is stopped too)
   }
   // ROUND 30 - LISTS FROM THE CLOUD WITHOUT A RELOAD. WHY: when a signed-in profile finds newer lists in the cloud, profiles.js used to reload the whole page; that reload could repeat for ever (see
