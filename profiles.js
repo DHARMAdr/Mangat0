@@ -202,8 +202,18 @@
     // WHY: a network failure gives no useful message by itself. HOW: catch it and throw a clear sentence instead. IMPROVE:
     // show the address that failed.
     catch { throw new Error('Could not reach the accounts server (check the address and your connection).'); }
-    let data = {}; try { data = await res.json(); } catch { /* not JSON */ }
-    if (!res.ok) throw new Error(data.error || ('Server answered HTTP ' + res.status));
+    // ROUND 47: read the answer as text first, so an HTML error page (Cloudflare "Error 1101") can be shown, and say what each status usually means.
+    // WHY: the person only saw "Server answered HTTP 500" and could not tell a wrong Worker setting from a broken app. HOW: hintFor() adds the usual cause in plain words.
+    // IMPROVE: link the matching step of the setup guide.
+    const raw = await res.text(); let data = {}; try { data = JSON.parse(raw); } catch { /* not JSON */ }
+    if (!res.ok) {
+      const hintFor = c => c === 403 ? ' - the Worker variable ALLOWED_ORIGINS must contain exactly https://dharmadr.github.io (no path)'
+        : c === 404 ? ' - the accounts server address is wrong (Profile > Server)'
+        : c === 429 ? ' - too many tries, wait a few minutes'
+        : c >= 500 ? ' - the Worker itself failed: in Cloudflare check that the D1 binding is named DB and that ADMIN_USER and ADMIN_CODE are set, then Deploy again' : '';
+      const snippet = data.error ? '' : ' [' + String(raw).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 70) + ']';
+      throw new Error((data.error || ('Server answered HTTP ' + res.status + snippet)) + hintFor(res.status));
+    }
     return data;
   }
   const tok = () => ({ token: session && session.token });       // the sign-in token that goes with every call
@@ -586,6 +596,8 @@
         '<label for="mfpCode">6-digit code</label><input type="password" id="mfpCode" class="mfp-code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" placeholder="••••••" autocomplete="off">' +
         (create ? '<p class="mfp-note">By creating a profile you agree that MangaFlow saves your <b>history</b> (manga names, chapters, download events, times) and your <b>bookmarks</b> in it, and that the <b>admin of this site can see them</b>. ' + (cloud ? 'They are stored on the accounts server.' : 'Without a server they stay in this browser only.') + ' The bookmarks you have now are copied into the new profile.</p>' : '') +
         '<p></p><button class="mfp-btn" type="submit" style="width:100%">' + (create ? 'Create profile and agree' : 'Sign in') + '</button></form>' +
+        // ROUND 47: anybody (not only a returning admin) can test the accounts server from the sign-in screen. WHY: when sign-in fails the first question is "is the server answering?".
+        (cloud ? '<p class="mfp-note"><button type="button" data-act="chk" class="mfp-btn ghost small">Check server</button></p>' : '') +
         '<p class="mfp-note">Mode: <b>' + (cloud ? 'cloud (works on all your devices)' : 'this device only') + '</b>.</p>';
     } else {
       const admin = session.role === 'admin';
@@ -695,6 +707,8 @@
   dlg.addEventListener('submit', async e => {
     // WHY: stop the browser's own form submit (it would reload the page). HOW: ignore submits that are not our sign-in form.
     e.preventDefault(); if (!e.target.matches('[data-act=go]')) return;
+    // ROUND 47: show "Signing in…" at once and block a second tap while the server answers (a slow Worker made people tap again and again: each tap was a new try, and 5 wrong tries lock the name for 15 minutes).
+    const btn = e.target.querySelector('button[type=submit]'); if (btn) { if (btn.disabled) return; btn.disabled = true; btn.textContent = 'Signing in…'; }
     try { await signIn($('#mfpUser').value, $('#mfpCode').value, view.tab === 'create'); } catch (err) { setMsg(err.message); }
     render();
   });
@@ -783,6 +797,12 @@
       else if (act === 'kind') view.kind = b.dataset.v;
       // ROUND 38: "All dates" button clears the date range filter entirely.
       // WHY: user wants to see everything — reset both bounds so the filter passes every entry. IMPROVE: none needed.
+      else if (act === 'chk') {
+        // ROUND 47: ask the accounts Worker for /ping and say the result in plain words (address, version, whether the admin is set, how long it took).
+        const t0 = Date.now(); setMsg('Checking the server…', true); await safeRender();
+        try { const r = await post('/ping', {}); setMsg('Server answers (' + (Date.now() - t0) + ' ms): version ' + (r.version || '?') + ', admin ' + (r.admin ? 'is set' : 'is NOT set - add ADMIN_USER and ADMIN_CODE in Cloudflare') + '. Address: ' + cloudUrl(), true); }
+        catch (e) { setMsg(e.message + ' | Address: ' + cloudUrl()); }
+      }
       else if (act === 'dpreset') { const n = +b.dataset.d || 1, d0 = new Date(); d0.setHours(0, 0, 0, 0); view.dateFrom = d0.getTime() - (n - 1) * 86400000; view.dateTo = Infinity; }   // ROUND 44: Today / 7 / 30 days
       else if (act === 'dateall') { view.dateFrom = 0; view.dateTo = Infinity; }
       else if (act === 'sel') view.sel = u;

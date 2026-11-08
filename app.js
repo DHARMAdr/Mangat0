@@ -7237,7 +7237,7 @@
       let sy = {}; try { sy = JSON.parse(localStorage.getItem('mf_sync') || '{}'); } catch { /* ignore */ }
       let who = '-'; try { const ss = JSON.parse(localStorage.getItem('mf_session') || 'null'); if (ss) who = ss.user + ' (' + ss.role + ', ' + (ss.cloud ? 'cloud' : 'local') + ')'; } catch { /* ignore */ }
       setTimeout(() => showError('The page was loaded ' + window.MF_LOOP.loads + ' times in ' + window.MF_LOOP.seconds + ' seconds', { title: '\u{1F501} The page keeps reloading',
-        hint: 'MangaFlow stopped its own automatic reloads for now. If this keeps happening, copy the report below and send it to Claude: it says what asked for each reload. Closing the tab and opening MangaFlow again usually ends it.',
+        hint: 'MangaFlow stopped its own automatic reloads for now. If the reasons below say "none written", the loads were probably your own refreshes or sign-in attempts (a successful sign-in reloads the page once) and nothing is wrong with the page itself. If it keeps happening on its own, copy the report and send it to Claude. Closing the tab and opening MangaFlow again usually ends it.',
         details: 'Loads of this tab in the last minute: ' + window.MF_LOOP.loads + ' (over ' + window.MF_LOOP.seconds + ' s)\nAutomatic reload reasons (newest last): ' + (window.MF_LOOP.why.length ? window.MF_LOOP.why.join(' | ') : 'none written (the browser or another script reloaded)') +
           '\nAddress: ' + location.href + '\nProfile: ' + who + ' | last sync: ' + (sy.t ? new Date(sy.t).toString() : 'never') + ' ok=' + sy.ok + ' ' + (sy.err || '') }), 1200);
     }
