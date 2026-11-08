@@ -800,8 +800,9 @@
       else if (act === 'chk') {
         // ROUND 47: ask the accounts Worker for /ping and say the result in plain words (address, version, whether the admin is set, how long it took).
         const t0 = Date.now(); setMsg('Checking the server…', true); await safeRender();
-        try { const r = await post('/ping', {}); setMsg('Server answers (' + (Date.now() - t0) + ' ms): version ' + (r.version || '?') + ', admin ' + (r.admin ? 'is set' : 'is NOT set - add ADMIN_USER and ADMIN_CODE in Cloudflare') + '. Address: ' + cloudUrl(), true); }
-        catch (e) { setMsg(e.message + ' | Address: ' + cloudUrl()); }
+        // ROUND 48: the message never shows the server address or version (security): only a plain "connected" / "not connected" sentence.
+        try { const r = await post('/ping', {}); setMsg(r.admin ? 'Server connected successfully.' : 'Server connected successfully, but the admin account is not set up on it yet.', true); }
+        catch (e) { setMsg('Server not connected. ' + String(e.message).replace(/https?:\/\/\S+/g, '').trim()); }
       }
       else if (act === 'dpreset') { const n = +b.dataset.d || 1, d0 = new Date(); d0.setHours(0, 0, 0, 0); view.dateFrom = d0.getTime() - (n - 1) * 86400000; view.dateTo = Infinity; }   // ROUND 44: Today / 7 / 30 days
       else if (act === 'dateall') { view.dateFrom = 0; view.dateTo = Infinity; }
