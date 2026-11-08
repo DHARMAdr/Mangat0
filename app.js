@@ -1813,8 +1813,45 @@
     // WHY: tell the person when the page tried to run a blocked script. HOW: the browser sends a securitypolicyviolation
     // event. IMPROVE: show it less often.
     d.addEventListener('securitypolicyviolation', onSecurityViolation);   // round 8: a script of the page was stopped -> tell the person
+    // ROUND 44 (Page 2 scroll-hide): watch this page's scrolling so the header and floating buttons hide when the
+    // person scrolls down and come back when they scroll up — the same feel as reading mode (Page 3).
+    p2ScrollHook(d);
     // WHY: add chapter list and shortcuts if data is already known. HOW: applyLive is below.
     applyLive(d);
+  }
+  // ROUND 44 — PAGE 2 SCROLL-HIDE (header + floating buttons).
+  // WHY: on Page 2 (an outside site shown in MangaFlow's mini-browser) the header and the round buttons always covered
+  //   the page. Earlier rounds (41/42) wrongly wrote that this is impossible; it is not: the page lives in a same-origin
+  //   srcdoc <iframe> (sandbox has allow-same-origin), so OUR script can listen to ITS window's 'scroll' event even
+  //   though the page's own scripts are blocked.
+  // HOW: a passive scroll listener on the frame's window. It adds up small movements (14px dead zone, so a tiny finger
+  //   wobble does nothing). Down far enough -> add class "mf-hide" on the header and "p2-hide" on <body> (CSS fades the
+  //   floating buttons); up far enough or near the top (<40px) -> remove both. After every change we ignore scroll events
+  //   for 450ms: hiding the header makes the frame taller, which at the very bottom of a page can clamp the scroll
+  //   position and fake an "up" scroll, which would show the header again and loop forever (flicker).
+  // IMPROVE: make the 14px dead zone a setting; also react to the wheel/touch events if a page has its own inner scroller.
+  const p2 = { lastY: 0, up: 0, down: 0, lockUntil: 0 };
+  function p2Set(hide) {
+    const nav = document.querySelector('.navbar');
+    if (nav) nav.classList.toggle('mf-hide', hide);
+    document.body.classList.toggle('p2-hide', hide);
+    p2.up = p2.down = 0; p2.lockUntil = performance.now() + 450;
+  }
+  function p2Reset() { p2.lastY = 0; p2.up = p2.down = 0; p2.lockUntil = 0; document.body.classList.remove('p2-hide'); }
+  function p2ScrollHook(d) {
+    const w = d && d.defaultView; if (!w) return;
+    p2Reset();
+    const getY = () => w.pageYOffset || (d.scrollingElement ? d.scrollingElement.scrollTop : 0) || 0;
+    w.addEventListener('scroll', () => {
+      if (frame.hidden || !reader.hidden) return;                    // only while Page 2 is the thing on screen
+      const y = getY();
+      if (performance.now() < p2.lockUntil) { p2.lastY = y; return; }
+      const dy = y - p2.lastY; p2.lastY = y;
+      const hidden = document.body.classList.contains('p2-hide');
+      if (y < 40) { if (hidden) p2Set(false); p2.up = p2.down = 0; return; }
+      if (dy < 0) { p2.up -= dy; p2.down = 0; if (hidden && p2.up > 14) p2Set(false); }
+      else if (dy > 0) { p2.down += dy; p2.up = 0; if (!hidden && p2.down > 14) p2Set(true); }
+    }, { passive: true });
   }
   // WHY: backup in case the timer missed. HOW: the iframe load event calls hookDoc, which ignores repeats.
   frame.addEventListener('load', () => hookDoc(frame.contentDocument));  // backup
@@ -2183,7 +2220,7 @@
     // instead) — without this, if the header happened to be hidden right when you tapped a search result, it
     // could still look hidden on the page you land on, with no more scroll events left on #viewport to reveal
     // it again. updateNav() already runs after every navigation, so this is a cheap, reliable place for the reset.
-    const navEl = document.querySelector('.navbar'); if (navEl) navEl.classList.remove('mf-hide');
+    const navEl = document.querySelector('.navbar'); if (navEl) navEl.classList.remove('mf-hide'); document.body.classList.remove('p2-hide');   // ROUND 44: also un-hide Page 2's floating buttons
     // WHY: nothing to go back to at the first page. HOW: disabled is true when hi is 0 or less.
     $('#btnBack').disabled = hi <= 0;
     // WHY: nothing ahead at the last page. HOW: compare hi to the last index.
@@ -5877,6 +5914,8 @@
   // That is a hard technical wall of the proxy design, not a bug, and is why this feature is scoped to our own
   // page only.
   // HOW: a small, self-contained copy of the up/down-accumulator idea the reading-mode header already uses, but
+  // ROUND 44 NOTE: the next lines were first written believing the iframe (Page 2) scroll cannot be observed. That was wrong;
+  //   Page 2 is handled by p2ScrollHook() next to hookDoc(). This block is for Page 1 (our own start page) only.
   // simpler — there is no "ignore the app's own scroll jumps" concern here (the start page never auto-scrolls
   // the way a reading chapter can), so every scroll is reacted to directly, no extra gating needed. See the
   // ".navbar" / ".navbar.mf-hide" rule in style.css for how the header actually animates away; updateNav() above

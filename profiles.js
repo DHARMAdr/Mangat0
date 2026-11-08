@@ -333,11 +333,28 @@
   #mfProf .mfp-badge.admin{background:#e040fb33;border-color:#e040fb;} #mfProf .mfp-badge.mode{background:#ffffff14;border-color:#ffffff40;}
   #mfProf .mfp-tabs{display:flex;gap:6px;flex-wrap:wrap;}
   #mfProf .mfp-tabs button{flex:1;min-width:84px;min-height:40px;border-radius:10px;border:1px solid #ffffff30;background:#ffffff0d;color:#cfd6ff;font:600 .85rem system-ui,sans-serif;cursor:pointer;}
+  /* ROUND 44 — Read / Download / All filter buttons. WHY: they reused .mfp-tabs button (flex:1; min-width:84px) PLUS an inline
+     min-width:64px inside a flex-wrap row whose children are forced to flex:1 1 140px; the long word "Download" overflowed
+     its box and the text sat off-centre. HOW: a dedicated 3-equal-column grid; every button is the same size, nowrap, text
+     centred with line-height:1. IMPROVE: use icons next to the words. */
+  #mfProf .mfp-row>.mfp-kinds{flex:1 1 100%;}
+  #mfProf .mfp-kinds{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;}
+  #mfProf .mfp-kinds button{box-sizing:border-box;min-height:40px;padding:0 6px;border-radius:10px;border:1px solid #ffffff30;background:#ffffff0d;color:#cfd6ff;font:600 .85rem/1 system-ui,sans-serif;cursor:pointer;display:flex;align-items:center;justify-content:center;text-align:center;white-space:nowrap;overflow:hidden;}
+  #mfProf .mfp-kinds button.on{background:linear-gradient(135deg,#25a8ff55,#bb20ff55);border-color:#7ff6ff;color:#fff;box-shadow:0 0 12px rgba(37,168,255,.4);}
+  #mfProf .mfp-chips{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 8px;}
+  #mfProf .mfp-chip{min-height:34px;padding:0 12px;border-radius:999px;border:1px solid #ffffff40;background:#ffffff10;color:#cfd6ff;font:600 .8rem/1 system-ui,sans-serif;cursor:pointer;}
+  #mfProf .mfp-chip:active{background:#25a8ff55;}
   #mfProf .mfp-tabs button.on{background:linear-gradient(135deg,#25a8ff55,#bb20ff55);border-color:#7ff6ff;color:#fff;box-shadow:0 0 12px rgba(37,168,255,.4);}
   #mfProf label{display:block;font:600 .78rem system-ui,sans-serif;color:#9fb0ff;margin:2px 0 4px;letter-spacing:.04em;text-transform:uppercase;}
   #mfProf input[type=text],#mfProf input[type=password],#mfProf input[type=search],#mfProf input[type=url]{width:100%;box-sizing:border-box;min-height:44px;padding:8px 12px;border-radius:10px;
     border:1px solid #ffffff3a;background:#05060f;color:#fff;font:500 16px ui-monospace,Consolas,monospace;}
   #mfProf input:focus{outline:2px solid #7ff6ff;border-color:transparent;}
+  /* ROUND 44 — THE REAL MOBILE DATE BUG: the date boxes had no colour rule, so on phones (iOS/Android) the chosen date was drawn
+     in the page's light text colour on the browser's white date field = invisible, and it looked like "nothing happened".
+     HOW: give date inputs a dark-on-white look (or dark theme) with colour-scheme so the native picker matches, bigger
+     tap height (44px) and 16px font (stops iOS zooming the page when the box is tapped). IMPROVE: theme from CSS variables. */
+  #mfProf input[type=date]{box-sizing:border-box;min-height:44px;padding:6px 8px;border-radius:10px;border:1px solid #ffffff40;background:#0b1020;color:#fff;color-scheme:dark;font:16px system-ui,sans-serif;-webkit-appearance:none;appearance:none;}
+  #mfProf input[type=date]::-webkit-date-and-time-value{text-align:left;color:#fff;min-height:1.2em;}
   #mfProf .mfp-code{letter-spacing:.5em;text-align:center;font-size:20px;}
   /* ROUND 39 FIX: buttons now use inline-flex to CENTER their text/icon both ways. WHY: before this, a button that
      ended up taller than its own text (because a row-sibling button wrapped to two lines, stretching every button in
@@ -428,7 +445,7 @@
     let downOut = false;
     const outside = e => { const r = dlg.getBoundingClientRect(); return e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom; };
     dlg.addEventListener('pointerdown', e => { downOut = e.target === dlg && outside(e); });
-    dlg.addEventListener('click', e => { if (downOut && e.target === dlg && outside(e)) dlg.close(); downOut = false; });
+    dlg.addEventListener('click', e => { if (downOut && e.target === dlg && outside(e) && Date.now() - dateTouched > 800 && !(document.activeElement && document.activeElement.type === 'date')) dlg.close(); downOut = false; });   // ROUND 44: ignore taps that just dismissed a date picker
   })();
   const icon = { read: '&#128214;', download: '&#11015;&#65039;' };   // little pictures for the history rows
   const setMsg = (m, ok) => { view.msg = m || ''; view.ok = !!ok; };   // the coloured message line at the top of the window
@@ -442,7 +459,10 @@
   //   can find the exact entry and remove it. We use t+url as a composite key because activity items have no unique id field.
   //   ROUND 38: removed the 200-entry cap; added date-range filter; canOpen also enables cloud delete.
   //   IMPROVE: paginate long lists; add undo (short grace period before the item disappears).
-  function listHtml(items, canOpen) {
+  // ROUND 44 — the list part is its own function. WHY: the From/To date boxes used to make the WHOLE dialog redraw on every change,
+  //   which destroyed the very <input type=date> the phone's native picker was still using (so the pick was lost / the picker closed).
+  //   HOW: histBody() builds ONLY the rows; applyHist() swaps just that part in place, the inputs are never touched. IMPROVE: paginate.
+  function histBody(items, canOpen) {
     const q = view.filter.toLowerCase();
     // ROUND 38: date range filter. WHY: without a cap, the full history can be very long — the filter gives quick access to
     //   any window. HOW: view.dateFrom / view.dateTo are timestamps; entries outside are hidden. 0 = no bound.
@@ -453,6 +473,20 @@
       (!q || (x.title + ' ' + x.chapter + ' ' + x.host).toLowerCase().includes(q)) &&
       ((x.t || 0) >= fromTs) && ((x.t || 0) <= toTs)
     );
+    return (rows.length ? '<ul class="mfp-list">' + rows.map(x => {
+        // WHY: the × button is only shown when canOpen=true (the profile owner is looking at their own history, not the admin view).
+        //   HOW: data-t holds the timestamp (used as part of the composite key); data-url is the other half.
+        //   We encode timestamp as a plain string — JSON.stringify is not needed because timestamp is always a number.
+        const delBtn = canOpen ? '<button class="mfp-btn small ghost mfp-del" data-act="delact" data-t="' + esc(String(x.t || '')) + '" data-url="' + esc(x.url || '') + '" title="Remove this entry" aria-label="Remove this entry">&#215;</button>' : '';
+        const openBtn = (canOpen && x.type === 'read' && safeHttp(x.url)) ? '<button class="mfp-btn small ghost" data-act="open" data-url="' + esc(x.url) + '">Open</button>' : '';
+        return '<li class="mfp-it"><span class="ico">' + (icon[x.type] || '&#8226;') + '</span><span class="txt"><div class="t">' + esc(x.title || x.url) + (x.chapter ? ' · ' + esc(x.chapter) : '') + '</div><div class="s">' + esc(x.host || '') + ' · ' + ago(x.t) + ' · ' + esc(fmt(x.t)) + '</div></span>' + openBtn + delBtn + '</li>';
+      }).join('') + '</ul>' : '<div class="mfp-empty">Nothing here yet.</div>');
+  }
+  // ROUND 44 — redraw only the rows (no input is recreated, so a native date picker / the keyboard never loses its element).
+  function applyHist() { const box = $('#mfpHistList'); if (box && view.histItems) box.innerHTML = histBody(view.histItems, view.histCan); }
+  function listHtml(items, canOpen) {
+    view.histItems = items; view.histCan = canOpen;   // ROUND 44: remembered so applyHist() can redraw just the rows
+    const fromTs = view.dateFrom || 0, toTs = view.dateTo || Infinity;
     // WHY: date <input type=date> uses YYYY-MM-DD strings; we convert to/from timestamps for the filter. IMPROVE: use Intl.
     // ROUND 43: was toISOString() = UTC, but the dates are read as LOCAL midnight, so in India (UTC+5:30) picking 1 Nov showed 31 Oct after the redraw and 'today' could not be picked after midnight. Now both sides use local time.
     const tsToDate = ts => { if (!ts) return ''; const d = new Date(ts); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
@@ -460,7 +494,7 @@
     // WHY: the history list with its search box, date range, and the three filter buttons. HOW: builds an HTML text; every
     //   outside value goes through esc() first. IMPROVE: paginate long lists.
     return '<div class="mfp-row"><input type="search" id="mfpFilter" placeholder="Search the history…" value="' + esc(view.filter) + '" aria-label="Search the history">' +
-      '<span class="mfp-tabs" style="flex:0 0 auto">' + ['all', 'read', 'download'].map(k => '<button data-act="kind" data-v="' + k + '" class="' + (view.kind === k ? 'on' : '') + '" style="min-width:64px">' + k + '</button>').join('') + '</span></div>' +
+      '<span class="mfp-kinds" role="group" aria-label="Filter by type">' + [['all', 'All'], ['read', 'Read'], ['download', 'Download']].map(k => '<button type="button" data-act="kind" data-v="' + k[0] + '" class="' + (view.kind === k[0] ? 'on' : '') + '" aria-pressed="' + (view.kind === k[0]) + '">' + k[1] + '</button>').join('') + '</span></div>' +
       // ROUND 40 FIX — the From/To date pickers worked on a computer but were unusable on a phone.
       //   WHY: the old markup put FIVE separate flex children (two labels, two <input type=date>, one button) directly
       //   into one .mfp-row. On a wide desktop window there is enough space for all five side by side. On a phone
@@ -474,18 +508,14 @@
       //   the "To" group wrap onto their OWN lines (each full-width) instead of both being crushed onto one line.
       //   IMPROVE: swap <input type=date> for a custom calendar widget if a browser's native one still misbehaves.
       '<div class="mfp-row mfp-daterow">' +
-        '<span class="mfp-dateitem"><label for="mfpFrom">From:</label><input type="date" id="mfpFrom" data-act="datefrom" value="' + esc(tsToDate(fromTs) || weekAgoDate) + '" max="' + esc(nowDate) + '" aria-label="History from date"></span>' +
-        '<span class="mfp-dateitem"><label for="mfpTo">To:</label><input type="date" id="mfpTo" data-act="dateto" value="' + esc(tsToDate(toTs === Infinity ? 0 : toTs) || nowDate) + '" max="' + esc(nowDate) + '" aria-label="History to date"></span>' +
-        '<button data-act="dateall" class="mfp-btn ghost small">All dates</button>' +
+        '<span class="mfp-dateitem"><label for="mfpFrom">From:</label><input type="date" id="mfpFrom" data-act="datefrom" value="' + esc(tsToDate(fromTs)) + '" max="' + esc(nowDate) + '" aria-label="History from date"></span>' +
+        '<span class="mfp-dateitem"><label for="mfpTo">To:</label><input type="date" id="mfpTo" data-act="dateto" value="' + esc(tsToDate(toTs === Infinity ? 0 : toTs)) + '" max="' + esc(nowDate) + '" aria-label="History to date"></span>' +
       '</div>' +
-      (rows.length ? '<ul class="mfp-list">' + rows.map(x => {
-        // WHY: the × button is only shown when canOpen=true (the profile owner is looking at their own history, not the admin view).
-        //   HOW: data-t holds the timestamp (used as part of the composite key); data-url is the other half.
-        //   We encode timestamp as a plain string — JSON.stringify is not needed because timestamp is always a number.
-        const delBtn = canOpen ? '<button class="mfp-btn small ghost mfp-del" data-act="delact" data-t="' + esc(String(x.t || '')) + '" data-url="' + esc(x.url || '') + '" title="Remove this entry" aria-label="Remove this entry">&#215;</button>' : '';
-        const openBtn = (canOpen && x.type === 'read' && safeHttp(x.url)) ? '<button class="mfp-btn small ghost" data-act="open" data-url="' + esc(x.url) + '">Open</button>' : '';
-        return '<li class="mfp-it"><span class="ico">' + (icon[x.type] || '&#8226;') + '</span><span class="txt"><div class="t">' + esc(x.title || x.url) + (x.chapter ? ' · ' + esc(x.chapter) : '') + '</div><div class="s">' + esc(x.host || '') + ' · ' + ago(x.t) + ' · ' + esc(fmt(x.t)) + '</div></span>' + openBtn + delBtn + '</li>';
-      }).join('') + '</ul>' : '<div class="mfp-empty">Nothing here yet.</div>');
+      '<div class="mfp-chips" role="group" aria-label="Quick date ranges">' +
+        [['1', 'Today'], ['7', '7 days'], ['30', '30 days']].map(c => '<button type="button" data-act="dpreset" data-d="' + c[0] + '" class="mfp-chip">' + c[1] + '</button>').join('') +
+        '<button type="button" data-act="dateall" class="mfp-chip">All dates</button>' +
+      '</div>' +
+      '<div id="mfpHistList">' + histBody(items, canOpen) + '</div>';
   }
   // WHY: the three big numbers above a history list. HOW: counts from the items.
   const stats = items => '<div class="mfp-stats"><div class="mfp-stat"><b>' + items.filter(x => x.type === 'read').length + '</b><span>chapters read</span></div><div class="mfp-stat"><b>' + items.filter(x => x.type === 'download').length + '</b><span>downloads</span></div><div class="mfp-stat"><b>' + new Set(items.map(x => x.title)).size + '</b><span>manga</span></div></div>';
@@ -668,8 +698,23 @@
     try { await signIn($('#mfpUser').value, $('#mfpCode').value, view.tab === 'create'); } catch (err) { setMsg(err.message); }
     render();
   });
+  // ROUND 44 — ONE shared date handler (input + change both call it). WHY: phones differ (some fire only 'input', some only
+  //   'change', iOS fires 'input' on every wheel spin), and the old code rebuilt the whole dialog each time, destroying the
+  //   input while the native picker was still open — the pick was lost on mobile but fine on desktop. HOW: accept only a full
+  //   YYYY-MM-DD with a sane year (a half-typed "0002" is ignored), save it, then redraw ONLY the list (applyHist). An empty
+  //   box (user pressed Clear in the picker) means "no limit". Also stamps dateTouched so a tap that dismisses the picker is
+  //   not mistaken for a tap on the dark backdrop. IMPROVE: debounce if the list ever gets huge.
+  let dateTouched = 0;
+  function onDate(inp) {
+    dateTouched = Date.now();
+    const d = inp.value, ok = /^\d{4}-\d{2}-\d{2}$/.test(d) && +d.slice(0, 4) >= 1990;
+    if (!ok && d !== '') return;
+    const t = ok ? new Date(d + 'T00:00:00').getTime() : 0;
+    if (inp.id === 'mfpFrom') view.dateFrom = ok ? t : 0; else view.dateTo = ok ? t + 86399999 : Infinity;
+    applyHist();
+  }
   dlg.addEventListener('input', e => {
-    if (e.target.id === 'mfpFilter') { view.filter = e.target.value; const pos = e.target.selectionStart; render().then(() => { const f = $('#mfpFilter'); if (f) { f.focus(); f.setSelectionRange(pos, pos); } }); }
+    if (e.target.id === 'mfpFilter') { view.filter = e.target.value; applyHist(); }   // ROUND 44: only the rows redraw, so the keyboard never closes
     // ROUND 39 FIX: date inputs are handled on 'change' below now, NOT here (see that handler for why) — EXCEPT:
     // ROUND 41 FIX — a few mobile browsers were found to not reliably fire 'change' at all after a date is
     // picked from their native calendar widget (only 'input'), which is why some phones still looked broken
@@ -680,14 +725,7 @@
     // gets it from the other handler; a phone that fires both just applies the same (already-correct) value
     // twice, which is harmless. HOW: shares the exact same deferred safeRender() pattern as the 'change'
     // handler, for the same reason (let the native picker's own closing sequence finish first).
-    else if (e.target.id === 'mfpFrom' || e.target.id === 'mfpTo') {
-      const d = e.target.value;
-      if (/^\d{4}-\d{2}-\d{2}$/.test(d)) {
-        if (e.target.id === 'mfpFrom') view.dateFrom = new Date(d + 'T00:00:00').getTime();
-        else view.dateTo = new Date(d + 'T00:00:00').getTime() + 86399999;
-        setTimeout(() => safeRender(), 0);
-      }
-    }
+    else if (e.target.id === 'mfpFrom' || e.target.id === 'mfpTo') onDate(e.target);
   });
   dlg.addEventListener('change', e => {
     if (e.target.id === 'mfpAuto') LS.set('mf_autobug', e.target.checked);   // the automatic-bug switch
@@ -703,23 +741,7 @@
     //   A regex double-checks the value is a full YYYY-MM-DD before converting it, so a browser quirk can never
     //   produce an invalid timestamp. Uses safeRender() (round 38's lock) instead of a bare render() so this can
     //   never race with a history delete tap. IMPROVE: none needed.
-    if (e.target.id === 'mfpFrom' || e.target.id === 'mfpTo') {
-      const d = e.target.value, valid = /^\d{4}-\d{2}-\d{2}$/.test(d);
-      if (e.target.id === 'mfpFrom') view.dateFrom = valid ? new Date(d + 'T00:00:00').getTime() : 0;
-      else view.dateTo = valid ? (new Date(d + 'T00:00:00').getTime() + 86399999) : Infinity;
-      // ROUND 41 FIX — still unreliable on phones even after round 40's layout fix.
-      // WHY: render() replaces the WHOLE dialog's HTML, including throwing away and recreating this very
-      // <input> element. On a computer the native date dropdown closes instantly the moment a date is picked,
-      // so by the time 'change' fires the picker is already fully gone and replacing the input a moment later
-      // is harmless. On a lot of phones, picking a date from the native calendar/wheel involves the picker's
-      // OWN closing animation and a focus-return step that is still finishing in the background exactly when
-      // 'change' fires — tearing the input out of the page synchronously, in the middle of that still-running
-      // native sequence, is what the round 39 comment above was already warning about for the OLD 'input'-based
-      // code, and it turns out 'change' was not fully immune to it either on some phones. HOW: let that
-      // in-flight browser sequence finish on its own first (setTimeout 0 defers to the next free moment, right
-      // after the current event finishes) and only THEN rebuild the dialog. IMPROVE: none needed.
-      setTimeout(() => safeRender(), 0);
-    }
+    if (e.target.id === 'mfpFrom' || e.target.id === 'mfpTo') onDate(e.target);
     // ROUND 41 — ticking/un-ticking one bookmark's checkbox (for the bulk "Remove selected" button).
     // WHY: a checkbox is not a [data-act] button, so it never reaches the click handler above — it needs its
     // own 'change' listener. HOW: add or remove this one url from view.bmSel, then safeRender() so the
@@ -761,6 +783,7 @@
       else if (act === 'kind') view.kind = b.dataset.v;
       // ROUND 38: "All dates" button clears the date range filter entirely.
       // WHY: user wants to see everything — reset both bounds so the filter passes every entry. IMPROVE: none needed.
+      else if (act === 'dpreset') { const n = +b.dataset.d || 1, d0 = new Date(); d0.setHours(0, 0, 0, 0); view.dateFrom = d0.getTime() - (n - 1) * 86400000; view.dateTo = Infinity; }   // ROUND 44: Today / 7 / 30 days
       else if (act === 'dateall') { view.dateFrom = 0; view.dateTo = Infinity; }
       else if (act === 'sel') view.sel = u;
       else if (act === 'open') { location.hash = '#r=' + encodeURIComponent(b.dataset.url); location.reload(); return; }

@@ -1398,3 +1398,10 @@ body.no-tr-file [data-tab="translate"] { display: none !important; }
    IMPROVE: none needed. */
 .steps .step:last-child:nth-child(odd) { grid-column: 1 / -1; }
 @media (max-width: 480px) { #heroForm input::placeholder, #popForm input::placeholder { font-size: 13px; } }
+
+/* ROUND 44 — PAGE 2 SCROLL-HIDE. WHY: app.js adds class "p2-hide" to <body> while the person scrolls DOWN inside an outside
+   site (Page 2); the header collapses (.navbar.mf-hide) and these floating buttons fade away so nothing covers the page.
+   Scrolling UP removes the class and everything fades back. HOW: opacity + no clicks (same trick as .ui-hide in reading mode);
+   the transition gives a smooth fade. IMPROVE: add any new floating button's id to this list. */
+#fabRead, #btnOrigSite, #mfSlider, #mfWheel, #mfEdge { transition: opacity .25s; }
+body.p2-hide #fabRead, body.p2-hide #btnOrigSite, body.p2-hide #mfSlider, body.p2-hide #mfWheel, body.p2-hide #mfEdge { opacity: 0; pointer-events: none; }

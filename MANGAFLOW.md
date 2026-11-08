@@ -1,63 +1,150 @@
-# MANGAFLOW — Project Reference & Build History
-*GitHub Pages site: https://dharmadr.github.io/Mangat1/*
-*Cloudflare Worker: accounts-worker.js (mangaflow-accounts.YOURNAME.workers.dev)*
-*Last updated: Round 43 — 2026-11-07*
+# MANGAFLOW — Project Reference, Code Map & Build History
+*GitHub repo: https://github.com/DHARMAdr/Mangat0 · Site: https://dharmadr.github.io/Mangat0/*
+*Cloudflare Workers: `worker.js` (page/image proxy) and `accounts-worker.js` (cloud profiles, D1 database)*
+*Last updated: Round 44 — 2026-11-08 · Only HTML, CSS and JavaScript are used (no build step, no frameworks).*
+
+> This ONE file replaces every older copy. It has (1) the page naming we use, (2) what every file is for, (3) for every part of every file **why it exists / how it works / how it can be improved**, (4) the complete history up to the latest round, (5) how to continue with Claude.
 
 ---
 
-## What is MangaFlow?
+## 0. Page names (used when talking about the site — they change NOTHING in the code)
 
-MangaFlow is a **static website** you host for free on GitHub Pages. It lets you read manga from many different manga sites (like MangaDex, Cubari, ArenaScan, etc.) inside one clean reader, with:
+| Name | What it is | Where in the code |
+|------|-----------|-------------------|
+| **Page 1** | The home / start page: search-or-paste-link box, Continue reading, Recent pages, Bookmarks. | `#viewport` content in `index.html`; `app.js` §6 (history lists), §7 (address bar) |
+| **Page 2** | The "main site" view: any outside site or search result opened INSIDE MangaFlow like a mini browser (e.g. www.google.com, a manga site's home page). | `<iframe id="frame">`; `app.js` §3 (fetch through proxy), §7 (renderFrame, hookDoc), §7b (make sites look complete) |
+| **Page 3** | Reading mode: chapters streamed one after another as images. | `#reader`, `#stream`; `app.js` §8–§11 |
 
-- Cloud profile system (sign-in with a 6-digit code, history/bookmarks saved to Cloudflare D1)
-- Translation overlay (OCR + AI translate — bubbles are detected, text replaced in-place)
-- PDF export (download a chapter as a PDF, with translated text overlaid when translate is ON)
-- Keep-screen-awake toggle for reading without the screen dimming
-- Bookmark / "continue reading" / recent pages saved to your cloud profile
-- Admin panel (see all users, their history, bug reports)
-
----
-
-## File Structure
-
-| File | Purpose |
-|------|---------|
-| `index.html` | The page shell. Loads CSS and all JS. CSP header lives here. |
-| `style.css` | All visual styling. Dark/light theme. |
-| `app.js` | Main app — navigation, chapter fetching, PDF download, settings, wake lock. |
-| `translate.js` | OCR + translation layer — detects text bubbles, overlays translations. |
-| `profiles.js` | Profile/cloud tab — sign-in, history, bookmarks, date filter, cloud sync. |
-| `pdfmaker.js` | Low-level PDF builder (`window.MangaPDFLib`). Used by app.js to encode images. |
-| `boot.js` | Runs before first paint: shows the "Reopening where you were…" cover and saved dark theme. |
-| `troubleshoot-data.js`, `chapter-slider.js`, `reload-wheel.js`, `edge-slider.js` | Optional add-ons (guide texts, chapter slider, reload wheel, Top/End slider). |
-| `accounts-worker.js` | Cloudflare Worker — cloud backend. D1 database. |
-| `worker.js` | Cloudflare proxy Worker — proxies image fetches past CORS restrictions. |
+Rule of thumb for scrolling: on **Page 2 and Page 3** scrolling DOWN hides the header and floating buttons, scrolling UP brings them back. Page 1 hides only the header.
 
 ---
 
-## How the Code Is Connected
+## 1. What is MangaFlow?
+A **static website** (GitHub Pages) that opens manga sites through CORS proxies, shows them cleanly (Page 2), detects chapter images and turns them into an endless-scroll reader (Page 3), with optional extras: cloud/local profiles, history, bookmarks, translation overlay (OCR), PDF download, wake-lock ("keep screen awake"), floating helper widgets and a built-in troubleshooter.
 
-```
-index.html
-  └── loads style.css
-  └── loads app.js          → uses MangaFlowTranslate (translate.js), MangaPDFLib (pdfmaker.js)
-  └── loads translate.js    → exposes window.MangaFlowTranslate { el, report, getPageData, ... }
-  └── loads profiles.js     → exposes window.MangaFlowProfiles { open }
-  └── loads pdfmaker.js     → exposes window.MangaPDFLib (loaded BEFORE app.js)
-```
+## 2. File map (what each file is for)
 
-The **Cloudflare Worker proxy** (`worker.js`) is deployed separately — it fetches manga images and pages from other sites and re-serves them with the right CORS headers so the browser will load them. Without it, most manga sites refuse direct image requests from GitHub Pages.
+| File | Size (lines) | Purpose |
+|------|--------------|---------|
+| `index.html` | ~660 | Page shell, CSP `<meta>`, every button/dialog, loads all scripts with `?v=NN` cache-busting (now **44**). |
+| `style.css` | ~1410 | All styling, light/dark themes, mobile rules, auto-hide rules. |
+| `app.js` | ~7340 | The main program (sections 0–18 below). |
+| `profiles.js` | ~980 | Profile window: sign-in, My history, Bookmarks, sync, Export, admin. |
+| `translate.js` | ~880 | OCR (Tesseract) + translation overlay on reader images. |
+| `boot.js` | 72 | Runs before first paint: theme + "Reopening…" cover + reload-loop guard. |
+| `pdfmaker.js` | 556 | Tiny PDF writer (no library) used by the download feature. |
+| `chapter-slider.js`, `reload-wheel.js`, `edge-slider.js` | 132/144/127 | Optional floating widgets (previous/next chapter slider, reload wheel, Top/End slider). |
+| `troubleshoot-data.js` | 165 | Plain-text data for Settings → Troubleshoot. |
+| `worker.js` | 232 | Cloudflare proxy Worker (deploy separately). |
+| `accounts-worker.js` | 286 | Cloudflare accounts Worker with D1 database (deploy separately). |
+| `_headers` | small | Security headers — **ignored by GitHub Pages** (only works on Cloudflare Pages/Netlify). The CSP in `index.html` is the one that really applies. |
+| `googledb6fd0cf04d837f7.html` | tiny | Google Search Console ownership file. Keep it. |
+| `.nojekyll` | empty | Tells GitHub Pages not to process files (needed for the `ocr/` folder names). |
+| `ocr/` | 14 files | Tesseract.js, its worker, wasm cores and language data. Self-hosted so the CSP can stay strict. |
 
-The **accounts Worker** (`accounts-worker.js`) is also deployed separately — it stores user data in a Cloudflare D1 (SQL) database: sign-in tokens, history, bookmarks, bug reports.
+Load order: `boot.js` → `style.css` → `pdfmaker.js` → `app.js` → `translate.js` / `profiles.js` / widgets / `troubleshoot-data.js`.
+
+---
+
+## 3. Code map: WHY / HOW / IMPROVE, per file and per section
+
+### 3.1 `app.js`
+| § | Lines (≈) | WHY it exists | HOW it works | IMPROVE |
+|---|-----------|---------------|--------------|---------|
+| 0 Security basics | 41–68 | Stop outside pages or typed text from running code in our page. | `esc()` for HTML, `safeHttp()` allows only http/https links, CSP in `index.html`. | Add a Trusted Types policy. |
+| 1 Small helpers | 69–133 | One place for tiny tools used everywhere. | `$`, `$$`, localStorage wrapper `LS` (prefix `mf_`, try/catch), timers, string cleaners. | Move helpers to a shared module. |
+| 2 Settings + theme | 134–336 | Remember what the person chose. | One object `settings` saved in `mf_settings`; `applySettings()` writes classes/CSS variables. | Validate with a small schema when loading. |
+| 3 Fetching through a CORS proxy | 337–546 | Browsers block reading other sites. | Tries proxies from the list in order, with timeouts/retries; decodes charset safely (`safeDecode`); `fixProxy` repairs pasted proxy URLs. | Rank proxies by recent success; use `Promise.any` for racing. |
+| 4 URL helpers | 547–577 | Clean, compare and build URLs. | Resolve relative links, strip tracking, host helpers. | Use `URL` everywhere. |
+| 4b Search engines | 578–635 | Typing words (not a link) must search. | Engine list; builds the search URL. | Let the user add engines. |
+| 4c Own results page | 636–784 | Show results inside MangaFlow without a server. | Google programmable search / own list page. | Cache results. |
+| 5 Errors, toast, busy, loading bar | 785–1083 | Tell the person what went wrong in plain words. | Big error dialog, small toasts, busy spinner (`wakeBusy` fixed in R43), top bar. | Add "copy details" everywhere. |
+| 5b Polite requests | 1084–1133 | Don't hammer sites (they ban you). | Queue with spacing/limits. | Per-host adaptive delay. |
+| 6 History lists (Page 1) | 1134–1296 | Recent pages, Continue reading, Bookmarks on the start page. | Arrays in localStorage; `listOf()` guards bad data; capped sizes. | Move to IndexedDB for big lists. |
+| 7 Mini browser (Page 2) | 1297–1636 | Use MangaFlow as a browser. | `renderFrame()` sanitizes HTML and sets `frame.srcdoc`; `hookDoc(d)` attaches click/submit/error handlers **and (R44) the scroll-hide listener**; address bar, Back/Forward, `navSeq` guard against late answers. | Show a real progress % ; support POST forms. |
+| 7b Making outside sites look complete | 1637–2239 | Proxied pages lose styles/images/lazy-load. | Rewrites URLs, loads lazy images, removes scripts, retries images through the proxy. | Per-site rule table in a JSON file. |
+| 8 Chapter + image detection | 2240–2865 | Decide whether a page is a chapter and find its images. | Many heuristics (selectors, lazy attributes, JSON blobs, filename patterns); rejects "locked/removed" pages. | Score candidates instead of first match. |
+| 8b Full chapter list | 2866–3755 | Chapter dropdown with ALL chapters. | Finds list on the page or the manga page; numeric parsing; fixes glued site-ids. | Cache lists per manga. |
+| 9 Reading mode (Page 3) | 3756–4171 | Endless chapters. | `#stream` gets one block per chapter; IntersectionObserver loads next; `_fillTok` token stops stale fills (R43). | Virtualize far-away images. |
+| 9b The keeper | 4172–4237 | Keep next chapters ready, heal failed images. | Periodic checks, re-fetch failed ones. | Back-off per host. |
+| 10 Chapter navigation | 4238–4320 | Prev/next, home/end, dropdown. | `stepChapter(±1)`, menu open/close. | Remember last chapter per manga. |
+| 9b' Reading upwards | 4321–4430 | Load earlier chapters on scroll up. | Prepend blocks while keeping scroll position. | — |
+| 10b Free memory | 4431–4527 | Phones run out of RAM. | Clear chapter cache button, unload far images. | Auto-clear by memory pressure. |
+| 11 Scroll tracking + auto-hide UI | 4528–4748 | Hide UI on scroll-down in reading mode. | Accumulators (14 px dead zone) → `body.scrolling`; `showUi/hideUi`. | Make dead zone a setting. |
+| 12 PDF download | 4749–5133 | Save chapters as PDF. | Fetch images → `MangaPDFLib` → one file; translated text optional. | Web Worker for encoding. |
+| 12b Range dialog | 5134–5385 | Choose which chapters to download. | `<dialog id="rangeDlg">`, size estimate. | Remember last range. |
+| 12c Download manager + dock | 5386–5823 | Show progress, pause/cancel. | Floating dock list. | Resume after reload. |
+| 13 Small-screen search bar | 5824–5839 | Space-saving search on phones. | Floating bar toggled by pill. | — |
+| 14 Event wiring | 5840–6099 | Connect buttons/keys to functions. | `keydown` handler (Esc, N, P, T, C, Home, End, arrows, F11), Page 1 header-hide (`navHideInit`). | Replace if-chain by key→function map. |
+| 15 Settings dialog + proxies | 6100–6351 | All options in one place. | Tabs, switches, proxy list editor. | Search box inside settings. |
+| 16 Start-up + safety nets | 6352–6407 | Never leave a blank screen. | Boot order, reload-loop guard (`MF_RELOAD`), `mf_alive` session marker. | — |
+| 17 Reports, watchers, troubleshooter | 6408–6718 | Help find problems fast. | Collects errors/diary; builds copyable report. | Anonymous opt-in telemetry. |
+| 18 Google search, full screen, Top/End, remember page | 6719–7340 | Extras around navigation. | `#p=`/`#q=` hash, CSE loader, F11, edge slider hooks. | — |
+
+**Page 2 scroll-hide (new, Round 44)** lives right after `hookDoc()` in §7: `p2ScrollHook(d)`, `p2Set()`, `p2Reset()`. WHY: the outside page is a same-origin `srcdoc` iframe (sandbox has `allow-same-origin`), so OUR script can listen to ITS `scroll` even though the page's own scripts are blocked. HOW: passive listener, 14 px dead zone, adds `.navbar.mf-hide` + `body.p2-hide`; a 450 ms lock after each change prevents a flicker loop (hiding the header makes the iframe taller; at the very bottom the browser clamps the scroll and fakes an "up" move). `updateNav()` removes both classes on every navigation. IMPROVE: make the dead zone a setting; handle pages with their own inner scroll container.
+
+### 3.2 `profiles.js`
+| Part | WHY | HOW | IMPROVE |
+|------|-----|-----|---------|
+| Storage + session (`LS`, `mf_session`, `tok()`) | Local mode works without a server; cloud mode adds a token. | `session = {user, role, cloud, token}`. | Encrypt local codes with WebCrypto. |
+| Lists (`readLists`, `writeLists`, `mergeLists`, `CAP`) | Keep reads/books/recent merged between devices without duplicates. | Merge by id/url, cap sizes (recent 500, reads 500, books 2000). | Timestamps per item for true conflict resolution. |
+| Cloud (`post`, `pullState`, `pushState`, `flush`, `syncAll`) | Sync with Cloudflare D1. | `post()` sends the token; `flush()` batches activity; `fetchFailed` stops stale cache use. | Retry queue with back-off. |
+| CSS block | Look of the floating window. | `#mfProf …` rules; **R44:** `.mfp-kinds` (3 equal columns), `.mfp-chips`, dark date inputs. | Move to style.css. |
+| `histBody()` / `applyHist()` / `listHtml()` | History list with search, All/Read/Download filter, From/To dates. | **R44:** the list lives in `#mfpHistList`; typing or changing a date redraws ONLY the list. Inputs are never recreated. | Pagination, undo on delete. |
+| `onDate()` | One handler for `input` + `change` on date boxes. | Accepts only full `YYYY-MM-DD` (year ≥ 1990); empty = no limit; stamps `dateTouched`. | Debounce for huge lists. |
+| `marksHtml()` | Bookmarks and Continue reading with × and bulk remove. | Checkbox set `view.bmSel`. | Push state right after delete (open item). |
+| `render()` / `safeRender()` | One function builds the whole window; the lock stops two renders racing. | Async + `renderPending`. | Virtual DOM-like diff. |
+| Click handler (`data-act`) | One place for all buttons: tab, kind, **dpreset (Today/7/30)**, dateall, open, delact, export, clear, sync, admin. | `switch`-like chain. | Map of handlers. |
+| Click-outside close | Tap on the dark backdrop closes it. | pointerdown+click pair; **R44:** ignored for 800 ms after a date change and while a date box is focused (a tap that dismisses a phone's date picker is not a backdrop tap). | — |
+
+### 3.3 `translate.js`
+Sections (≈ line numbers): language tables and settings (58–200); Tesseract loader and worker (200–420, uses `ocr/`); text-box finding / merging (420–660); translation services — Chrome on-device, Google, MyMemory (660–840); overlay drawing + `MangaFlowTranslate.getPageData` for PDF (840–882).
+WHY: read raw-language manga. HOW: OCR each reader image → group lines into bubbles → translate → draw a box over the bubble. R43 fixes: `hasOwnProperty` language check, MyMemory error handling, real-404-only caching of language files. IMPROVE: run OCR in a pool of workers; cache results per image hash; better bubble clean-up (inpainting).
+
+### 3.4 `style.css`
+Sections: 1 theme variables · 2 base reset · 3 buttons/inputs · 4 browser view (`.navbar`, `#viewport`, `#frame`, `#fabRead`, `#btnOrigSite`) · 4b search pill · 5 reader bar · 6 auto-hide (`.ui-hide`, `body.scrolling`) · 7 chapter column · 8 floating reader keys · 9 chapter dropdown · 10 toast/busy/settings · 10b PDF panel · 10c settings fits one screen · 11 big error · 12 failed page notices · 13+ later rounds (each marked ROUND n). **R44 (end of file):** `body.p2-hide` fades `#fabRead`, `#btnOrigSite`, `#mfSlider`, `#mfWheel`, `#mfEdge`.
+WHY: one stylesheet = one cache entry. IMPROVE: split per feature; replace repeated media queries with container queries.
+
+### 3.5 `index.html`
+Head: CSP, `boot.js`, `style.css?v=44`. Body: `#browser` (navbar, start page, `#frame`), `#reader`, dialogs (`#settings`, `#rangeDlg`, error), floating buttons, script tags with `?v=44`. WHY the `?v=NN`: GitHub Pages caches files, so a changed `app.js` was invisible on phones until the number changed (found in R42). **Always bump the number when any file changes.** IMPROVE: generate the number from a build step or file hash.
+
+### 3.6 Small files
+- `boot.js` — runs in `<head>` before paint: theme colours, "Reopening where you were…" cover, reload-loop guard. IMPROVE: none needed.
+- `pdfmaker.js` — copies original JPEG/PNG bytes into a PDF (no re-compression = fast, lossless). IMPROVE: more PNG modes, streaming output for huge PDFs.
+- `chapter-slider.js` — drag a knob down = next chapter, up = previous. Optional: delete the `<script>` line and nothing breaks.
+- `reload-wheel.js` — half turn right = reload this chapter; left = reload all open chapters.
+- `edge-slider.js` — drag up/release = Top, down/release = End; works on Page 2 and Page 3.
+- `troubleshoot-data.js` — symptoms/answers/prompts as plain data; add new entries without touching `app.js`.
+- `worker.js` — CORS proxy. **`ALLOWED` is empty = anyone can use it. Fill it (or add a `TOKEN`) after testing.** IMPROVE: rate limit per IP.
+- `accounts-worker.js` — sign-in, activity log, delete/clear endpoints (all need the token), bug reports, admin. IMPROVE: password hashing with a per-user salt and rate limiting on sign-in.
+
+---
+
+## 4. Round 44 — Full Change Log (2026-11-08)
+
+1. **Page 2 scroll-hide (app.js §7, style.css).** Scrolling down inside an outside site hides the header and the floating buttons; scrolling up shows them, like reading mode. Reset on every navigation. Earlier comments (rounds 41/42) saying this was "technically impossible" were wrong and are corrected.
+2. **My history filter buttons (profiles.js).** Read / Download / All were squeezed by two competing flex rules; the word "Download" overflowed. Now a 3-equal-column grid (`.mfp-kinds`), `nowrap`, centred, `line-height:1`.
+3. **From/To date filter on phones (profiles.js).** Three real causes found: (a) the date text was drawn light-on-white on phones, so a picked date was invisible — dark styling + `color-scheme` + 16 px font (stops iOS zoom); (b) every change rebuilt the whole window, destroying the input while the native picker was open — now only the list redraws; (c) a tap that dismissed the picker could land on the dark backdrop and close the whole window — guarded. Added quick chips **Today / 7 days / 30 days / All dates**; boxes are empty when there is no limit; a half-typed year is ignored.
+4. Search box in My history no longer loses the keyboard (list-only redraw).
+5. Full sweep: every Settings tab, reading-mode keys (T, C, Esc, N, P, Home, End, arrows, PageDown, Space) and header buttons, add-on globals and the profile actions were re-tested in phone emulation — no errors.
+6. Cache-busting number 43 → 44; this document rewritten.
+
+Tests used: Playwright with mocked proxies (Pixel 7 and iPhone 13 emulation, Asia/Kolkata time zone).
+
+### Open items (not changed)
+- Bookmark deleted in profile can reappear from the cloud until the next state push (push right after delete).
+- `worker.js` `ALLOWED` is empty (open proxy) — fill it.
+- Revoke the old Google API key that starts `AIzaSyC-cqQ0…` (it is public in the repo).
+- A real phone's native date picker cannot be driven by Playwright; the fix was verified by logic and emulation. If it still misbehaves on one specific phone, tell Claude the model + browser.
 
 ---
 
 ## How to Deploy / Set Up
 
 ### 1. GitHub Pages
-- Fork or push to `DHARMAdr/Mangat1`
+- Fork or push to `DHARMAdr/Mangat0`
 - Enable GitHub Pages from `main` branch root
-- Site is live at `https://dharmadr.github.io/Mangat1/`
+- Site is live at `https://dharmadr.github.io/Mangat0/`
 
 ### 2. Cloudflare Proxy Worker (`worker.js`)
 - Cloudflare Dashboard → Workers → Create → paste `worker.js` → Deploy
@@ -77,7 +164,12 @@ The **accounts Worker** (`accounts-worker.js`) is also deployed separately — i
 
 ---
 
-## Round-by-Round Change History (key rounds)
+---
+
+## 5. Round-by-Round Change History (key rounds)
+| 44 | Page 2 scroll-hide; profile filter buttons; mobile date filter (invisible text, rebuild, backdrop close); chips; new doc | profiles.js, app.js, style.css, MANGAFLOW.md |
+(Rounds before 44 follow.)
+
 
 | Round | What changed |
 |-------|-------------|
