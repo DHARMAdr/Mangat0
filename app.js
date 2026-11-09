@@ -1307,6 +1307,8 @@
   let cur = null;                  // { url, base, doc, chapters, listHtml, token } - the page currently shown
   // WHY: our own back and forward list. HOW: hist is the list of pages and hi is the position in it; -1 means empty.
   // IMPROVE: limit its length.
+  // ROUND 53: navMax = newest browser-history step we created. WHY: after Back, the Forward button stayed greyed out (it only looked at our old page list), so Forward could never be tapped. HOW: each pushState stores its step number (mfi); popstate reads it back so updateNav knows if a newer step exists.
+  let navMax = 0;
   let hist = [], hi = -1;          // our own back/forward stack
   // WHY: a counter that gives each render a unique number so we can recognise the right document. HOW: goes up by one on
   // every render. IMPROVE: none needed.
@@ -2265,7 +2267,7 @@
     // WHY: nothing to go back to at the first page. HOW: disabled is true when hi is 0 or less.
     $('#btnBack').disabled = hi <= 0;
     // WHY: nothing ahead at the last page. HOW: compare hi to the last index.
-    $('#btnFwd').disabled = hi >= hist.length - 1;
+    $('#btnFwd').disabled = ((history.state && history.state.mfi) || 0) >= navMax;   // ROUND 53: native-history aware
     // WHY: the floating read button only makes sense with an open page. HOW: hide it when cur is empty.
     $('#fabRead').hidden = !cur || !!cur.isSearch;   // round 17: a results list has nothing to read, so no Reading-mode button
     // WHY: show if this page is bookmarked. HOW: a filled star if any bookmark has the same url, else an empty star.
@@ -4756,6 +4758,7 @@
     // the page, never sneaks in a hide on its own). A short holdUi window right after a show additionally
     // blocks any hide for the next 900ms, so a little scroll jitter right after the bar reappears cannot
     // immediately hide it again.
+    if (y < 40) showUi();   // ROUND 53: at the very top the bar is ALWAYS visible, even inside the short hold after a key jump (it used to stay hidden for 2.5 s)
     if (Date.now() > holdUi) {
       if (y < 40) showUi();                              // at the very top the bar is always visible
       // WHY: show the controls when the person scrolls up a little, hide them when scrolling down. HOW: upAcc / downAcc add up
@@ -4832,7 +4835,7 @@
     if (!settings.noHistory && !reader.hidden) {
       const hash = '#r=' + encodeURIComponent(ch.url), full = location.pathname + cleanSearch() + hash;
       const changed = full !== (location.pathname + cleanSearch() + location.hash);
-      try { if (push && !suppressPush && changed) history.pushState(null, '', full); else history.replaceState(null, '', full); } catch { /* address bar not writable: fine */ }
+      try { if (push && !suppressPush && changed) history.pushState({ mfi: ++navMax }, '', full); else history.replaceState(history.state, '', full); } catch { /* address bar not writable: fine */ }
     }
     saveRead({
       id: new URL(R.chapters[0].url).origin + '|' + R.title,
@@ -6222,7 +6225,8 @@
     const plain = !e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey;
     // WHY: The main shortcut list. HOW: an if / else-if chain; Escape closes the chapter menu if open, otherwise leaves
     // reading mode. IMPROVE: replace the chain with an object that maps keys to functions.
-    if (k === 'escape') { if (!$('#chapterMenu').hidden) closeMenu(); else exitReading(); }
+    // ROUND 53: Esc while the page is in browser full screen only LEAVES full screen (it used to also close reading mode and leave the screen stuck in full-screen styling).
+    if (k === 'escape') { if (!$('#chapterMenu').hidden) closeMenu(); else if (fsApiEl()) { leaveFs(); setTimeout(syncFs, 150); } else exitReading(); }
     // WHY: Keyboard shortcut for chapters. HOW: n goes to the next chapter, p to the previous one (stepChapter(1) or -1).
     // IMPROVE: show the shortcuts in a help pop-up.
     else if (k === 'n') stepChapter(1);
@@ -6971,8 +6975,8 @@
     const full = location.pathname + cleanSearch() + hash;
     const changed = full !== (location.pathname + cleanSearch() + location.hash);   // ROUND 46: a leftover ?url= is stripped with replaceState, never pushed
     try {
-      if (push && !suppressPush && changed) history.pushState(null, '', full);
-      else history.replaceState(null, '', full);
+      if (push && !suppressPush && changed) history.pushState({ mfi: ++navMax }, '', full);
+      else history.replaceState(history.state, '', full);
     } catch { /* address bar not writable: fine */ }
   }
 
@@ -7335,6 +7339,7 @@
   //   it once the restore's own async work has finished) stops that.
   // IMPROVE: keep the exact scroll position per chapter, not just which chapter is open.
   window.addEventListener('popstate', () => {
+    setTimeout(() => { try { updateNav(); } catch { /* ignore */ } }, 0);   // ROUND 53: refresh Back/Forward greying after every native step
     const h = location.hash;
     suppressPush = true;
     const release = () => { suppressPush = false; };
