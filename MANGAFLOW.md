@@ -1,7 +1,7 @@
 # MANGAFLOW — Project Reference, Code Map & Build History
 *GitHub repo: https://github.com/DHARMAdr/Mangat0 · Site: https://dharmadr.github.io/Mangat0/*
 *Cloudflare Workers: `worker.js` (page/image proxy) and `accounts-worker.js` (cloud profiles, D1 database)*
-*Last updated: Round 54 — 2026-11-10 · Only HTML, CSS and JavaScript are used (no build step, no frameworks).*
+*Last updated: Round 55 — 2026-11-10 · Only HTML, CSS and JavaScript are used (no build step, no frameworks).*
 
 > This ONE file replaces every older copy. It has (1) the page naming we use, (2) what every file is for, (3) for every part of every file **why it exists / how it works / how it can be improved**, (4) the complete history up to the latest round, (5) how to continue with Claude.
 
@@ -183,6 +183,12 @@ Report: `nyxscans.com/series/.../chapter-0` gave "No chapters or chapter images 
 1. **Short chapters**: `looksLikeChapter()` needed 3+ pictures. HOW fixed: also a chapter when the address has a chapter number, the page has at least 1 real picture AND a Previous/Next chapter link. Verified with a mock (`work/audit/nyx.js`): old build = error, new build = reader opens with chapters 0 and 1.
 2. **Font warning**: `fontBad` fired when ANY font failed. HOW fixed: warn only when an icon-style font failed or more than half of the fonts failed; the report now lists the failed font names ("fonts that failed (n of m): ...").
 Not verifiable here (sandbox cannot reach nyxscans.com): whether the real chapter pictures load; check after hard refresh. If the chapter still fails, copy the report: look at the line "pictures with an address".
+
+## 4k. Round 55 — Chapter audit: no more silent jumps from chapter 1 to 22 (app.js, `?v=55`)
+Report (nyxscans, Roxana): boxes were Chapter 0, 1, 22..40; chapters 2–21 were missing and no error showed. Cause: the site's own list skipped them and the reader trusted the list.
+**New algorithm** (all in app.js before `startReading`): `fillChapterGaps()` reads the number from each chapter address, finds every missing whole number between the first (or 0/1 if the first is small) and the last, and adds a guessed chapter (same address pattern). `verifyChapterList()` then fetches each guessed address in the background (3 at a time): pages with pictures stay, 404 / no pictures are removed from list and menu. `auditReport()` shows ONE pop-up "Chapter check" listing: chapters in the site's list, expected, gaps added, found, NOT on the original site, could not be checked, and (30 s later) chapters in the list but not shown in reading mode. The same text is in both diagnostic reports as "Chapter audit (round 55)".
+Mock test `work/audit/gap.js`: list 0,1,22..30 + chapters 2–5 and 10–21 exist, 6–9 give 404 -> menu 0..5,10..30 and pop-up "missing on the site: 6, 7, 8, 9".
+Limits: only sites whose chapter addresses contain "chapter/ch/episode + number"; sites with ID-only addresses are skipped (the report says "skipped"). Chapters NEWER than the newest listed are not searched yet. When reading starts from a chapter page whose series page cannot be found, the list is only the prev/next chain, so no gaps can be seen.
 
 ### Open items (not changed)
 - Bookmark deleted in profile can reappear from the cloud until the next state push (push right after delete).

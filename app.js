@@ -3959,6 +3959,117 @@
           removed in leaveReader(). `quiet` is used by the automatic start (no pop-up if it cannot start).
      HOW: analyze() works out the chapters, then the first batch of chapters is loaded (loadNext). */
   // WHY: Start reading mode. HOW: finds chapters, switches the screen, loads the first batch. Returns true or false.
+
+  /* CHAPTER AUDIT (round 55) - nyxscans.com showed chapter 0, 1 and then 22..40: chapters 2 to 21 were missing from the site's own list, and the reader simply jumped from 1 to 22 without a word.
+     WHY: a list with holes is wrong, and the person must be told. HOW (3 steps):
+       1. fillChapterGaps(): read the chapter number from each address (".../chapter-22"), find every whole number missing between the first and the last, and add a GUESSED chapter for each one
+          (same address pattern, other number). Numbers before the first one are only added when the first number is small (0 to 5), so chapters 1,2,3 are never forgotten.
+       2. verifyChapterList(): ask the site for each guessed address (3 at a time). A page with pictures stays in the list; a 404 / no pictures = the site itself does not have that chapter,
+          so it is removed and written into the audit.
+       3. auditReport(): one pop-up with the report that names the missing numbers and WHY (not on the site / site page without pictures / could not be checked). 30 seconds later the same
+          check looks at the chapter boxes: a chapter that is in the list but did not show its pictures is reported as "not detected in reading mode".
+     IMPROVE: also look for chapters AFTER the newest one in the list (try last+1, last+2). */
+  function chapterNumInUrl(url) {
+    try { const m = CH_RE.exec(decodeURIComponent(new URL(url).pathname)); return m ? parseFloat(m[1].replace(/[_-]/, '.')) : null; } catch { return null; }
+  }
+  // WHY: build "same address with another number". HOW: like synthesizeChapters: replace the digits in the path and keep zero padding.
+  function chapterUrlMaker(url) {
+    let u; try { u = new URL(url); } catch { return null; }
+    const m = CH_RE.exec(u.pathname); if (!m) return null;
+    const at = m.index + m[0].length - m[1].length, width = m[1].length, pad = m[1].startsWith('0') && width > 1;
+    return n => u.origin + u.pathname.slice(0, at) + (pad ? String(n).padStart(width, '0') : String(n)) + u.pathname.slice(at + width) + u.search;
+  }
+  function fillChapterGaps(chapters, startIdx) {
+    const audit = { expected: 0, listed: chapters.length, gaps: [], dead: [], unsure: [], notDetected: [], verified: 0, done: false };
+    try {
+      const nums = chapters.map(c => chapterNumInUrl(c.url));
+      const known = nums.filter(n => n != null);
+      if (chapters.length < 2 || known.length < Math.max(2, chapters.length * 0.6)) { audit.skipped = 'chapter numbers cannot be read from the addresses'; auditHold = audit; return chapters; }
+      const whole = new Set(known.filter(n => Number.isInteger(n)));
+      const lo = Math.min(...known), hi = Math.max(...known);
+      const from = lo <= 5 ? (whole.has(0) || lo === 0 ? 0 : 1) : Math.ceil(lo);
+      const missing = [];
+      for (let n = from; n <= Math.floor(hi) && missing.length < 800; n++) if (!whole.has(n)) missing.push(n);
+      audit.expected = Math.floor(hi) - from + 1; audit.gaps = missing.slice();
+      if (missing.length) {
+        const out = chapters.slice();
+        missing.forEach(n => {
+          // pattern from the listed chapter whose number is closest
+          let best = -1, bd = 1e9; nums.forEach((x, i) => { if (x != null && Math.abs(x - n) < bd) { bd = Math.abs(x - n); best = i; } });
+          const mk = best >= 0 ? chapterUrlMaker(chapters[best].url) : null; if (!mk) return;
+          out.push({ url: mk(n), title: '', num: n, guess: true, gap: true });
+        });
+        out.sort((x, y) => (x.num - y.num) || 0);
+        chapters = out;
+      }
+    } catch (e) { audit.skipped = 'check failed: ' + (e && e.message); }
+    auditHold = audit; return chapters;
+  }
+  let auditHold = null;
+  const auditShown = new Set();
+  async function verifyChapterList(gen) {
+    const A = auditHold; if (!A) return; R.audit = A;
+    const gaps = R.chapters.filter(c => c.gap);
+    let k = 0;
+    const one = async () => {
+      while (k < gaps.length) {
+        const c = gaps[k++]; if (R.gen !== gen) return;
+        try {
+          const { doc, base } = await fetchDoc(c.url);
+          const sc = scanPictures(doc, base);
+          if (sc.list.length >= 1 || sc.holders >= 1 || looksLikeChapter(doc, base, c.url)) { c.verified = true; A.verified++; }
+          else { c.dead = true; A.dead.push(c.num + ' (page exists but has no pictures)'); }
+        } catch (e) {
+          const msg = String((e && e.message) || e);
+          if (/HTTP 404|HTTP 410|NOT FOUND/i.test(msg)) { c.dead = true; A.dead.push(c.num + ' (not on the site: ' + (msg.match(/HTTP 4\d\d/) || ['not found'])[0] + ')'); }
+          else A.unsure.push(c.num + ' (' + msg.slice(0, 60) + ')');
+        }
+      }
+    };
+    await Promise.all([one(), one(), one()]);
+    if (R.gen !== gen) return;
+    // take dead chapters off the screen and out of the menu
+    R.chapters.forEach((c, i) => { if (c.dead) { const sec = stream.querySelector('.chapter[data-index="' + i + '"]'); if (sec) removeSection(sec); } });
+    buildChapterMenu(); updateDlBar();
+    const byNum = (x, y) => parseFloat(x) - parseFloat(y); A.dead.sort(byNum); A.unsure.sort(byNum);
+    A.done = true;
+    auditReport(gen, false);
+    setTimeout(() => { if (R.gen === gen) auditReport(gen, true); }, 30000);
+  }
+  function auditReport(gen, late) {
+    const A = R.audit; if (!A || R.gen !== gen) return;
+    if (late) {
+      A.notDetected = [];
+      $$('.chapter', stream).forEach(x => {
+        const i = +x.dataset.index, c = R.chapters[i]; if (!c || c.dead) return;
+        const pics = x.querySelectorAll('img.page').length;
+        if (!pics && !x.dataset.verify && (x.dataset.failed === '1' || x.querySelector('.ch-msg')) ) A.notDetected.push(fmtNum(c.num));
+      });
+    }
+    const problems = A.dead.length + A.unsure.length + A.notDetected.length;
+    if (!problems && !A.skipped) return;
+    const key = (R.seriesUrl || R.title) + '|' + A.dead.join() + '|' + A.unsure.join() + '|' + A.notDetected.join();
+    if (auditShown.has(key)) return; auditShown.add(key);
+    if (A.skipped && !problems) return;      // nothing wrong was found; the note is only for the diagnostic report
+    const lines = [
+      'Chapter check for "' + R.title + '"',
+      'Chapters in the site\'s own list: ' + A.listed + ' | expected from the numbers: ' + A.expected,
+      'Missing from the site\'s list and added by guessing: ' + (A.gaps.length ? A.gaps.join(', ') : 'none'),
+      'Found on the site after checking: ' + A.verified,
+      'NOT on the original site (so the site itself lacks them): ' + (A.dead.length ? A.dead.join(', ') : 'none'),
+      'Could not be checked (network or block, will be tried again when reached): ' + (A.unsure.length ? A.unsure.join(', ') : 'none'),
+      'In the list but NOT shown in reading mode: ' + (A.notDetected.length ? A.notDetected.join(', ') : 'none')
+    ];
+    const head = A.notDetected.length ? 'Some chapters were found on the site but could not be shown in reading mode: ' + A.notDetected.slice(0, 8).join(', ')
+      : A.dead.length ? 'The site is missing ' + A.dead.length + ' chapter(s): ' + A.dead.slice(0, 8).map(x => x.split(' ')[0]).join(', ') + (A.dead.length > 8 ? ' …' : '')
+      : 'Some chapters could not be checked: ' + A.unsure.slice(0, 8).map(x => x.split(' ')[0]).join(', ');
+    showError(head, { title: '📚 Chapter check: ' + (A.notDetected.length ? 'not shown in reading mode' : A.dead.length ? 'missing on the site' : 'could not verify'), details: lines.join('\n'), hint: 'Open the original site and look at the chapter list. If the chapter is there, press Retry on its box or send this report.' });
+  }
+  function chapterAuditText() {
+    const A = R && R.audit; if (!A) return 'no audit yet';
+    return 'listed ' + A.listed + ', expected ' + A.expected + ', gaps ' + (A.gaps.length || 0) + ', verified ' + A.verified + ', not on site [' + A.dead.join('; ') + '], unchecked [' + A.unsure.join('; ') + '], not shown [' + A.notDetected.join(', ') + ']' + (A.skipped ? ', skipped: ' + A.skipped : '') + (A.done ? '' : ' (still checking)');
+  }
+
   async function startReading(opts = {}) {
     // WHY: Need a page first. HOW: if none is open, show a message and stop.
     if (!cur) { toast('Open a manga page first'); return false; }
@@ -3992,6 +4103,9 @@
     Object.keys(estCache).forEach(k => delete estCache[k]);
     // WHY: Start a fresh reading session. HOW: new state object; gen goes up by 1 so old loads are ignored.
     humanHosts.clear();                                                  // round 29e: a new reading session starts with a clean slate (no site is "waiting for the check" yet)
+    { const keepU = info.chapters[info.start] && info.chapters[info.start].url;
+      info.chapters = fillChapterGaps(info.chapters, info.start);   // ROUND 55: add chapters the site's own list skipped (see fillChapterGaps)
+      if (keepU) { const k = info.chapters.findIndex(c => c.url === keepU); if (k >= 0) info.start = k; } }
     R = { gen: R.gen + 1, title: info.title, chapters: info.chapters, first: info.start, next: info.start, cur: info.start, loading: false, paused: false, seriesUrl: info.seriesUrl };
     // WHY: Fill the chapter menu. HOW: buildChapterMenu().
     buildChapterMenu();
@@ -4015,6 +4129,8 @@
     io.disconnect(); io.observe(sentinel);
     // WHY: Show the one-time tip. HOW: call readingTip().
     readingTip();
+    // ROUND 55: check the added chapters and the whole list in the background; any problem is reported by itself.
+    const auditGen = R.gen; verifyChapterList(auditGen);
     // WHY: Load the first batch. HOW: wait for loadNext().
     await loadNext();
     // WHY: Tell the caller it worked. HOW: return true.
@@ -6806,6 +6922,7 @@
     row(null, 'Picture routes: ' + routeStatText());
     row(null, 'Site view pictures (round 51): ' + pageViewPicText());
     row(null, 'Chapter boxes (round 52): ' + chapterHealthText());
+    row(null, 'Chapter audit (round 55): ' + chapterAuditText());
     row(null, 'Memory: ' + heapText() + ' · PDF picture quality: ' + settings.pdfMode);
     return rows;
   }
@@ -6856,7 +6973,7 @@
       'Human check (round 29e): ' + (humanHosts.size ? [...humanHosts.keys()].join(', ') + ' waiting' : 'no site waiting'),
       'Search engine: ' + settings.searchEngine + ' (strict ' + !!settings.engineStrict + '), Google ID ' + (settings.googleCx || 'none') + ', last Google result: ' + (googleLast || 'no Google search yet') + ', blocked by page rules: ' + (Array.from(cspSeen).join(', ') || 'nothing'),
       'Profile: ' + (PF && PF.user() ? PF.user() + ' (' + PF.role() + ')' : 'not signed in') + ', sync: ' + (si && si.ok !== null ? (si.ok ? 'OK ' : 'FAILED ' + si.err + ' ') + new Date(si.t).toLocaleTimeString() : 'nothing sent yet'),
-      'Picture routes: ' + routeStatText(), 'Site view pictures (round 51): ' + pageViewPicText(), 'Chapter boxes (round 52): ' + chapterHealthText(), 'Memory: ' + heapText(),
+      'Picture routes: ' + routeStatText(), 'Site view pictures (round 51): ' + pageViewPicText(), 'Chapter boxes (round 52): ' + chapterHealthText(), 'Chapter audit (round 55): ' + chapterAuditText(), 'Memory: ' + heapText(),
       'Downloads: ' + (jobs.map(j => '#' + j.id + ' ' + j.status + ' ' + (j.pct || 0) + '% ' + (j.text || '')).join(' | ') || 'none'),
       extra || '',
       '--- last problems (newest last) ---', errLog.slice(-4).map(e => e.report).join('\n\n=====\n') || 'none',
