@@ -1897,7 +1897,10 @@
   // WHY: add chapters, shortcuts and link changes to the page that is on screen now. HOW: stop if no chapters are known
   // yet. IMPROVE: none.
   function applyLive(d) {
-    if (!cur || !cur.chapters || !cur.chapters.length) return;
+    if (!cur) return;
+    // ROUND 56: the button bridge needs no chapter list, so it runs first (only when the frame shows the page we think it shows).
+    { const m0 = d.querySelector('meta[name="mf-token"]'); if (m0 && m0.content === cur.token) { markNavControls(d); updateP2Bar(); } }
+    if (!cur.chapters || !cur.chapters.length) return;
     // WHY: be sure the frame shows the page we think it shows. HOW: read its token meta tag and compare with cur.token; if
     // different, do nothing.
     const mark = d.querySelector('meta[name="mf-token"]');
@@ -1907,9 +1910,171 @@
     injectChapters(d, cur); fixShortcuts(d, cur.chapters); neutralizeLinks(d, cur.base);
   }
 
+
+  /* ===========================================================================================================
+     ROUND 56 - BUTTON BRIDGE  (the site's own "Next / Previous / Chapters" buttons work on Page 2 again)
+     WHY: nyxscans.com (and many modern sites built with React / Next.js) draw their chapter bar with SCRIPT-driven buttons: <button> tags with no address inside them. MangaFlow never runs a site's scripts
+          (the CSP and the sandbox block them - that is what keeps you safe), so those buttons did nothing on Page 2.
+     HOW (3 parts):
+       1. READ THE MEANING: classifyControl() looks at the clicked thing and its parents (label, title, picture alt, small words, id/class names, symbols such as > and <) and decides: NEXT, PREVIOUS or CHAPTER LIST.
+          It works in many languages (English, Spanish, French, Portuguese, Indonesian, Turkish, German, Italian, Arabic, Chinese, Japanese, Korean).
+       2. DO THE JOB OURSELVES: navTargets() finds the real addresses from the page's own links, the chapter list we already detected, or - as the last guess - the same address with the chapter number +1 / -1.
+          Next / Previous then open that address in Page 2; Chapter list opens our own small chapter picker (a plain <dialog>, so it needs no script from the site).
+          A control that carries an address in a data attribute (data-href, data-url, ...) is simply opened.
+       3. MAKE THEM REACHABLE: markNavControls() un-hides recognised buttons that the site keeps transparent until its script runs, and if the page has NO recognisable chapter buttons at all, a tiny icon bar
+          (previous / list / next) is shown instead (updateP2Bar), so changing chapters always works.
+     IMPROVE: learn new words from the person (a "teach this button" mode); remember which button words worked on which site. */
+  const NAV_STRONG = {
+    next: /(^|[^a-z])(next|forward|siguiente|suivant|pr[oó]ximo|proximo|selanjutnya|berikutnya|sonraki|weiter|avanti|nächste)([^a-z]|$)|التالي|下一|次の|次へ|다음/i,
+    prev: /(^|[^a-z])(prev|previous|anterior|pr[eé]c[eé]dent|sebelumnya|[oö]nceki|zur[uü]ck|precedente|vorherige)([^a-z]|$)|السابق|上一|前の|前へ|이전/i,
+    list: /(chapter\s*list|chapters?|episodes?|all\s*chapters|table of contents|cap[ií]tulos|chapitres|daftar\s*chapter|b[oö]l[uü]mler|kapitel|capitoli)|الفصول|章节|章節|目录|目次|챕터|목록|화\s*목록/i
+  };
+  const NAV_SYMBOL = { next: /^[\s]*[›»▶►➡→>⏩⟩❯]+[\s]*$/, prev: /^[\s]*[‹«◀◄⬅←<⏪⟨❮]+[\s]*$/ };
+  const NAV_WEAK = {
+    next: /(^|[^a-z])(next|nxt|forward)([^a-z]|$)/i,
+    prev: /(^|[^a-z])(prev|previous|prv|back-chapter)([^a-z]|$)/i,
+    list: /(chapter[-_ ]?(list|select|menu|dropdown|picker)|chapters?[-_ ]?(btn|button|toggle|drawer)|episode[-_ ]?list|toc)/i
+  };
+  function isButtonLike(el) {
+    if (!el || el.nodeType !== 1) return false;
+    const t = el.tagName;
+    if (/^(BUTTON|SUMMARY)$/.test(t) || el.hasAttribute('onclick') || el.hasAttribute('tabindex')) return true;
+    const role = (el.getAttribute('role') || '').toLowerCase(); if (role === 'button' || role === 'link' || role === 'menuitem' || role === 'tab') return true;
+    try { return el.ownerDocument.defaultView.getComputedStyle(el).cursor === 'pointer'; } catch { return false; }
+  }
+  // WHY: collect the "words" of one control. HOW: label-type attributes first (strong), id/class names second (weak).
+  function controlClues(el) {
+    const g = n => el.getAttribute(n) || '';
+    let svgTitle = ''; try { const t = el.querySelector('svg title'); svgTitle = t ? t.textContent : ''; } catch { /* ignore */ }
+    let alt = ''; try { const i = el.querySelector('img[alt]'); alt = i ? i.getAttribute('alt') : ''; } catch { /* ignore */ }
+    const text = (el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 60);
+    const strong = [g('aria-label'), g('title'), g('alt'), g('data-title'), g('data-tooltip'), g('name'), g('value'), alt, svgTitle, text].join(' | ');
+    const weak = [el.id, typeof el.className === 'string' ? el.className : g('class'), g('data-testid'), g('data-action'), g('aria-controls')].join(' ');
+    return { strong, weak, text };
+  }
+  // WHY: decide what a control means. HOW: symbols alone (> or <) -> next / prev; strong words next; weak names only for button-like things.
+  function classifyControl(el) {
+    const c = controlClues(el);
+    if (NAV_SYMBOL.next.test(c.text)) return 'next';
+    if (NAV_SYMBOL.prev.test(c.text)) return 'prev';
+    const n = NAV_STRONG.next.test(c.strong), p = NAV_STRONG.prev.test(c.strong), l = NAV_STRONG.list.test(c.strong);
+    if (n && !p) return 'next'; if (p && !n) return 'prev';
+    if (!n && !p && l && c.text.length <= 40) return 'list';
+    if (isButtonLike(el)) {
+      const wn = NAV_WEAK.next.test(c.weak), wp = NAV_WEAK.prev.test(c.weak), wl = NAV_WEAK.list.test(c.weak);
+      if (wn && !wp) return 'next'; if (wp && !wn) return 'prev'; if (wl && !wn && !wp) return 'list';
+    }
+    return null;
+  }
+  // WHY: is the page on screen a chapter page? HOW: a chapter number in the address, or the 3-picture rule.
+  function onChapterPage() {
+    try { return !!cur && !cur.isSearch && (chapterNumInUrl(cur.url) != null || looksLikeChapter(cur.doc, cur.base, cur.url)); } catch { return false; }
+  }
+  // WHY: the real places "next", "previous" and "list" lead to. HOW: the page's own links -> the detected list -> same address with the number +1 / -1 (last guess).
+  function navTargets() {
+    const out = { prev: null, next: null, idx: -1, guessed: false };
+    if (!cur) return out;
+    let nl = {}; try { nl = findNavLinks(cur.doc, cur.base, cur.url) || {}; } catch { /* ignore */ }
+    out.prev = nl.prev || null; out.next = nl.next || null;
+    const L = cur.chapters || [], i = L.findIndex(c => sameUrl(c.url, cur.url));
+    if (i >= 0) { out.idx = i; if (!out.prev && L[i - 1]) out.prev = L[i - 1].url; if (!out.next && L[i + 1]) out.next = L[i + 1].url; }
+    if (!out.prev || !out.next) {
+      const n = chapterNumInUrl(cur.url), mk = chapterUrlMaker(cur.url);
+      if (n != null && Number.isInteger(n) && mk) {
+        if (!out.next) { out.next = mk(n + 1); out.guessed = true; }
+        if (!out.prev && n > 0) { out.prev = mk(n - 1); out.guessed = true; }
+      }
+    }
+    return out;
+  }
+  function openNavTarget(kind) {
+    const t = navTargets();
+    if (kind === 'list') return openChapterPicker();
+    const u = t[kind];
+    if (!u) { toast('There is no ' + (kind === 'next' ? 'next' : 'previous') + ' chapter on this site.'); return; }
+    navigate(u, true, { chapterStep: true });
+  }
+  // WHY: our own chapter picker (the site's list button cannot run its script). HOW: a <dialog> in MangaFlow itself; the list comes from cur.chapters, or is loaded from the series page first.
+  async function openChapterPicker() {
+    let dlg = document.getElementById('mfChapPick');
+    if (!dlg) {
+      dlg = document.createElement('dialog'); dlg.id = 'mfChapPick';
+      dlg.innerHTML = '<h3>Chapters</h3><input id="mfChapFind" type="search" placeholder="Find a chapter number…" aria-label="Find a chapter"><ul id="mfChapUl"></ul><div class="row"><button id="mfChapClose">Close</button></div>';
+      document.body.appendChild(dlg);
+      dlg.querySelector('#mfChapClose').onclick = () => dlg.close();
+      dlg.addEventListener('click', e => { if (e.target === dlg) dlg.close(); });
+    }
+    const ul = dlg.querySelector('#mfChapUl'), find = dlg.querySelector('#mfChapFind'); ul.innerHTML = '<li class="muted">Loading the chapter list…</li>'; find.value = '';
+    if (!dlg.open) dlg.showModal();
+    let L = cur && cur.chapters && cur.chapters.length ? cur.chapters : null;
+    if (!L && cur) { try { const r = await loadSeriesList(cur.doc, cur.base, cur.url); if (r && r.chapters && r.chapters.length) { L = r.chapters; cur.chapters = L; } } catch { /* shown below */ } }
+    if (!L) { ul.innerHTML = '<li class="muted">The chapter list could not be found on this site. Use Reading mode (the book button) instead.</li>'; return; }
+    const draw = q => {
+      ul.innerHTML = ''; const want = String(q || '').trim().toLowerCase();
+      L.forEach(c => {
+        const label = 'Chapter ' + fmtNum(c.num) + (c.title && !/^chapter\s*[\d.]+$/i.test(c.title) ? ' - ' + c.title : '');
+        if (want && !label.toLowerCase().includes(want)) return;
+        const li = document.createElement('li'), b = document.createElement('button');
+        b.textContent = label; if (sameUrl(c.url, cur.url)) { b.className = 'now'; b.setAttribute('aria-current', 'true'); }
+        b.onclick = () => { dlg.close(); navigate(c.url, true, { chapterStep: true }); };
+        li.appendChild(b); ul.appendChild(li);
+      });
+      if (!ul.children.length) ul.innerHTML = '<li class="muted">No chapter matches.</li>';
+      const now = ul.querySelector('.now'); if (now) now.scrollIntoView({ block: 'center' });
+    };
+    draw(''); find.oninput = () => draw(find.value);
+  }
+  // WHY: the click hook. HOW: called first from onFrameClick; true = handled (the site's own dead handler must not run).
+  function bridgeClick(e) {
+    if (!cur || cur.isSearch) return false;
+    let el = e.target && e.target.nodeType === 1 ? e.target : (e.target && e.target.parentElement);
+    for (let hop = 0; el && hop < 6 && el.tagName !== 'BODY' && el.tagName !== 'HTML'; hop++, el = el.parentElement) {
+      // a control that simply carries an address in a data attribute
+      const du = el.getAttribute && (el.getAttribute('data-href') || el.getAttribute('data-url') || el.getAttribute('data-link') || el.getAttribute('data-target-url'));
+      if (du && !el.closest('a[href]') && !/^(javascript|data|blob|mailto|tel):/i.test(du)) { const u = absUrl(du, cur.base); if (u) { e.preventDefault(); e.stopPropagation(); navigate(unwrap(u)); return true; } }
+      if (el.closest && el.closest('a[href]') ) return false;                         // a real link: the normal code handles it
+      if (!onChapterPage()) return false;
+      const kind = classifyControl(el);
+      if (kind) { e.preventDefault(); e.stopPropagation(); openNavTarget(kind); return true; }
+    }
+    return false;
+  }
+  // WHY: some sites keep the bar invisible (opacity 0 / hidden) until their script runs. HOW: for recognised controls, force them visible. Returns how many recognised controls the page has.
+  function markNavControls(d) {
+    let n = 0;
+    try {
+      const w = d.defaultView;
+      d.querySelectorAll('button,[role=button],[onclick],[tabindex],summary,div,span').forEach(el => {
+        if (el.dataset && el.dataset.mfNav) { n++; return; }
+        if (!isButtonLike(el)) return;
+        if (el.querySelector && el.querySelector('button,[role=button]')) return;     // only the innermost control
+        const kind = classifyControl(el); if (!kind) return;
+        el.dataset.mfNav = kind; n++;
+        for (let p = el, k = 0; p && k < 5 && p !== d.body; p = p.parentElement, k++) {
+          const cs = w.getComputedStyle(p);
+          if (cs.opacity === '0' || cs.visibility === 'hidden') { p.style.setProperty('opacity', '1', 'important'); p.style.setProperty('visibility', 'visible', 'important'); }
+          if (cs.pointerEvents === 'none') p.style.setProperty('pointer-events', 'auto', 'important');
+        }
+      });
+    } catch { /* never break the page */ }
+    return n;
+  }
+  // WHY: the tiny fallback bar. HOW: shown only on a chapter page that has no recognisable chapter buttons of its own.
+  function updateP2Bar() {
+    const bar = document.getElementById('p2NavBar'); if (!bar) return;
+    let show = false;
+    try {
+      if (cur && !cur.isSearch && !frame.hidden && reader.hidden && onChapterPage()) {
+        const found = (frame.contentDocument && frame.contentDocument.querySelectorAll('[data-mf-nav]').length) || 0;
+        show = found === 0;
+      }
+    } catch { show = false; }
+    bar.hidden = !show;
+  }
   // WHY: runs when the person clicks inside the frame. HOW: e is the click event; find the nearest link above the clicked
   // thing; stop if none. IMPROVE: none.
   function onFrameClick(e) {
+    if (bridgeClick(e)) return;               // ROUND 56: the site's own Next / Previous / Chapters buttons (see the button bridge above)
     // ROUND 25: Allow all site interactions (buttons, dropdowns, forms) to work. Only intercept link navigation.
     // WHY: preventing all clicks broke site features like filters, buttons, dropdowns. HOW: only preventDefault on actual link clicks.
     const a = e.target.closest && e.target.closest('a');
@@ -2279,6 +2444,7 @@
     $('#fabRead').hidden = !cur || !!cur.isSearch;   // round 17: a results list has nothing to read, so no Reading-mode button
     // WHY: show if this page is bookmarked. HOW: a filled star if any bookmark has the same url, else an empty star.
     $('#btnStar').textContent = cur && books.some(b => b.url === cur.url) ? '★' : '☆';
+    updateP2Bar();                                  // ROUND 56: the small chapter bar follows the page on screen
     // ROUND 39: the "Open on <site>" button (below the header) only makes sense while an actual external manga
     // site's page is on screen — not on the start page, and not on a search-results list (there is no single
     // "original page" for a list of results to open). HOW: same condition already used for #fabRead above, so the
@@ -6213,6 +6379,7 @@
   // WHY: reader buttons. HOW: the read button starts reading; exit leaves reading mode; chapters button opens the menu
   // (stopPropagation keeps the document click from closing it at once). IMPROVE: none needed.
   $('#fabRead').onclick = () => startReading();
+  $('#p2Prev').onclick = () => openNavTarget('prev'); $('#p2List').onclick = () => openNavTarget('list'); $('#p2Next').onclick = () => openNavTarget('next');   // ROUND 56
   $('#btnExit').onclick = exitReading;
   $('#btnChapters').onclick = e => { e.stopPropagation(); toggleMenu(); };
   // WHY: previous/next chapter and reload buttons. HOW: each calls its function. IMPROVE: none needed.
