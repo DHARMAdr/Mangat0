@@ -1765,7 +1765,14 @@
       // returns null if they left.
       await wait(1800); fd = liveDoc(token); if (!fd) return;
     }
-    stat.fontsBad = fontBad(fd);
+    // ROUND 54: only warn about fonts when it matters. WHY: nyxscans lists many text fonts (Arabic and others) and one of them failing made the notice say "icons may look like empty boxes" even though the page looked fine.
+    // HOW: name the failed fonts in the report; warn only if an ICON-style font failed (name has icon / awesome / symbol / glyph / material / fa) or more than half of all fonts failed.
+    // IMPROVE: also check that an icon glyph really drew.
+    try {
+      const all = Array.from(fd.fonts), bad = all.filter(f => f.status === 'error');
+      if (bad.length) stat.notes.push('fonts that failed (' + bad.length + ' of ' + all.length + '): ' + bad.map(f => String(f.family).replace(/["']/g, '')).slice(0, 12).join(', '));
+      stat.fontsBad = bad.some(f => /icon|awesome|symbol|glyph|material|(^|[^a-z])fa([^a-z]|$)/i.test(f.family)) || (all.length > 0 && bad.length * 2 > all.length);
+    } catch { stat.fontsBad = false; }
     pageHealth(fd, stat, base);
   }
   // WHY: judge the finished page honestly and, if something is wrong, show a slim notice with a Report button (a copyable bug report).
@@ -2820,7 +2827,15 @@
     const sc = scanPictures(doc, base);
     if (sc.list.length >= 3) return true;
     if (sc.holders >= 2 && sc.list.length + sc.holders >= 3) return true;
-    return chapterNumOf(url) != null && metaImageSamples(doc, base).some(u => NUM_IMG.test(u));
+    if (chapterNumOf(url) != null && metaImageSamples(doc, base).some(u => NUM_IMG.test(u))) return true;
+    // ROUND 54: a SHORT chapter (1 or 2 pictures, for example one long stitched picture) is still a chapter. WHY: nyxscans chapter-0 had only ONE real picture, so the 3-picture rule said
+    // "not a chapter" and the reader showed "No chapters or chapter images found". HOW: the address has a chapter number, the page has at least 1 real picture, AND it has a Previous/Next chapter link.
+    // The Previous/Next link keeps ordinary pages that only show one photo from being treated as chapters. IMPROVE: also accept a page whose only big picture sits in a reader box.
+    if (chapterNumOf(url) != null && sc.list.length >= 1) {
+      const nav = findNavLinks(doc, base, url);
+      if (nav && (nav.prev || nav.next)) return true;
+    }
+    return false;
   }
 
   /* CHAPTER LIST WITHOUT NUMBERS IN THE LINKS (round 8)

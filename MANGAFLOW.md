@@ -1,7 +1,7 @@
 # MANGAFLOW — Project Reference, Code Map & Build History
 *GitHub repo: https://github.com/DHARMAdr/Mangat0 · Site: https://dharmadr.github.io/Mangat0/*
 *Cloudflare Workers: `worker.js` (page/image proxy) and `accounts-worker.js` (cloud profiles, D1 database)*
-*Last updated: Round 53 — 2026-11-09 · Only HTML, CSS and JavaScript are used (no build step, no frameworks).*
+*Last updated: Round 54 — 2026-11-10 · Only HTML, CSS and JavaScript are used (no build step, no frameworks).*
 
 > This ONE file replaces every older copy. It has (1) the page naming we use, (2) what every file is for, (3) for every part of every file **why it exists / how it works / how it can be improved**, (4) the complete history up to the latest round, (5) how to continue with Claude.
 
@@ -177,6 +177,12 @@ The owner asked for a full debugger + troubleshooter run with a written report. 
 2. **Esc while in browser full screen also closed reading mode** and left `body.fs` stuck (header hidden). HOW fixed: in the key handler, Esc with `document.fullscreenElement` only calls `leaveFs()` then `syncFs()`; Esc outside full screen still leaves reading.
 3. **Header stayed hidden at the very top for up to 2.5 s after a key jump** (n / p / arrows). WHY: `showUi()` sat inside the `Date.now() > holdUi` gate. HOW fixed: `if (y < 40) showUi()` now runs before the gate.
 Test-script lessons (not site bugs): settings controls live in tabs (click the tab first); with Slider/Edge ON the Top/End/Prev/Next keys are hidden by design; Esc with nothing open leaves reading mode by design; Page 2 toolbar slides away after scrolling down.
+
+## 4j. Round 54 — nyxscans.com: one-picture chapter + false "font" warning (app.js, `?v=54`)
+Report: `nyxscans.com/series/.../chapter-0` gave "No chapters or chapter images found"; Page 2 said "An icon / text font could not be loaded". Page data: only ONE real chapter picture (a long stitched .webp), a Next link, a React reader (`reader-shell`).
+1. **Short chapters**: `looksLikeChapter()` needed 3+ pictures. HOW fixed: also a chapter when the address has a chapter number, the page has at least 1 real picture AND a Previous/Next chapter link. Verified with a mock (`work/audit/nyx.js`): old build = error, new build = reader opens with chapters 0 and 1.
+2. **Font warning**: `fontBad` fired when ANY font failed. HOW fixed: warn only when an icon-style font failed or more than half of the fonts failed; the report now lists the failed font names ("fonts that failed (n of m): ...").
+Not verifiable here (sandbox cannot reach nyxscans.com): whether the real chapter pictures load; check after hard refresh. If the chapter still fails, copy the report: look at the line "pictures with an address".
 
 ### Open items (not changed)
 - Bookmark deleted in profile can reappear from the cloud until the next state push (push right after delete).
