@@ -1325,6 +1325,14 @@
       // WHY: put the real address into src. HOW: tries each attribute name; the first non-empty one is copied to src and the
       // loop stops (break). IMPROVE: none needed.
       for (const a of attrs) { const v = img.getAttribute(a); if (v) { img.setAttribute('src', v); break; } }
+      // ROUND 50 (comizy.io chapters looked empty on Page 2): the five names above are only a few of the ways sites hide a picture address (data-page-src, data-original-src,
+      //   a site-made name like data-cmz, a loading.gif or tiny data: drawing left in src, a srcset only...). Reading mode (Page 3) already knows them all through
+      //   imgAddressInfo(), which is why reading mode found the chapter while Page 2 showed blanks. HOW: when src is still missing or only a placeholder, ask the SAME
+      //   function and copy what it finds into src. IMPROVE: keep one shared list so the two pages can never disagree again.
+      try {
+        const cs = (img.getAttribute('src') || '').trim();
+        if (!cs || cs.startsWith('data:') || BAD_IMG.test(cs)) { const info = imgAddressInfo(img, location.href); if (info.raw && info.attr !== 'src') img.setAttribute('src', info.raw); }
+      } catch { /* leave this picture as it is */ }
       // WHY: some sites give several sizes in data-srcset. HOW: copies it to srcset when present. IMPROVE: none needed.
       const ss = img.getAttribute('data-srcset'); if (ss) img.setAttribute('srcset', ss);
       // WHY: some sites refuse pictures when they see our address as the referrer. HOW: no-referrer tells the browser not to
@@ -1552,7 +1560,7 @@
     // where the icon DOES render (the outline is subtle and sits behind/around a real glyph without covering it).
     // IMPROVE: detect common icon-font unicode ranges and draw a plain geometric fallback shape instead of a box.
     '.fa:empty,.fas:empty,.far:empty,.fab:empty,.icon:empty,[class*="icon-"]:empty,.material-icons:empty{min-width:1.1em;min-height:1.1em;display:inline-block;outline:1px dashed currentColor;outline-offset:1px;opacity:.55;border-radius:3px}';
-  function renderFrame(doc, base) {
+  function renderFrame(doc, base, extraPics) {
     // WHY: never change the original saved page. HOW: cloneNode(true) makes a deep copy that we can edit freely.
     const d = doc.cloneNode(true);
     // ROUND 15 (pages that looked "not loaded"): fix three common tricks BEFORE the cleaning below deletes their clues.
@@ -1585,6 +1593,16 @@
     // WHY: lazy-loaded pictures would stay empty without help. HOW: fixLazy copies real picture addresses into src. IMPROVE:
     // none.
     fixLazy(d);
+    // ROUND 50: pictures that have NO address anywhere in the page (their address is built by the site's script, like comizy.io pages 4 and up) get the addresses that reading mode's
+    //   detector found in the page's scripts (extraPics, computed by the caller before scripts were removed). They are given out in page order to the empty slots only.
+    //   IMPROVE: also keep the slot's original size so the page does not jump when the picture arrives.
+    if (extraPics && extraPics.length) {
+      try {
+        const imgs = Array.from(d.querySelectorAll('img')), have = new Set(imgs.map(i => absUrl((i.getAttribute('src') || '').trim(), base)).filter(Boolean));
+        const free = extraPics.filter(u => !have.has(u));
+        imgs.filter(i => { const cs = (i.getAttribute('src') || '').trim(); return (!cs || cs.startsWith('data:') || BAD_IMG.test(cs)) && isHolder(i); }).forEach((i, k) => { if (free[k]) { i.setAttribute('src', free[k]); i.removeAttribute('srcset'); i.setAttribute('referrerpolicy', 'no-referrer'); } });
+      } catch { /* the page still shows without them */ }
+    }
     // WHY: if the chapter list is already known (for example after a reload), add it right now. HOW: only runs when cur has
     // a non-empty chapters list.
     if (cur && cur.chapters && cur.chapters.length) { injectChapters(d, cur); fixShortcuts(d, cur.chapters); }   // known already (e.g. page reload)
@@ -2095,8 +2113,21 @@
       // and token.
       if (stale()) return false;                      // round 18: do not replace a newer page with this old answer
       cur = { url, base, doc, chapters: null, listHtml: '', token: '', isSearch };
+      // ROUND 50: a page with several empty picture slots (script-built chapter) borrows the reader's picture finder, but only for that case and never longer than 6 seconds.
+      let extra = null;
+      try {
+        const empties = Array.from(doc.querySelectorAll('img')).filter(i => !imgAddress(i, base) && isHolder(i)).length;
+        if (empties >= 2 && !isSearch) {
+          // 1) the quick way: a list of picture addresses written inside the page's own scripts (the page's scripts are only READ as text, never run)
+          const js = fromScripts(doc, base);
+          if (js.length >= 3) extra = js;
+          // 2) otherwise the full chapter finder (it can also use the page text and numbered neighbours), limited to 6 seconds
+          else { const f = await Promise.race([chapterPictures(doc, base, url), new Promise(r => setTimeout(() => r(null), 6000))]); if (f && f.list && f.list.length >= 3) extra = f.list; }
+        }
+      } catch { /* show the page without them */ }
+      if (stale()) return false;
       // WHY: show the page. HOW: renderFrame cleans it and puts it in the iframe.
-      renderFrame(doc, base);
+      renderFrame(doc, base, extra);
       // WHY: swap the start screen for the page. HOW: hide the start screen and show the frame.
       $('#start').hidden = true; frame.hidden = false;
       // ROUND 18: the Google panel is not needed any more, and the address bar remembers THIS page so a refresh returns here (not to the start page).
@@ -2629,7 +2660,7 @@
       raw = srcsetBest(img.getAttribute('data-srcset') || img.getAttribute('srcset') || (pic && (pic.getAttribute('srcset') || pic.getAttribute('data-srcset'))) || '');
       if (raw) attr = 'srcset';
     }
-    return { url: raw ? (absUrl(raw.trim(), base) || '') : '', attr };
+    return { url: raw ? (absUrl(raw.trim(), base) || '') : '', attr, raw: raw ? raw.trim() : '' };   // ROUND 50: raw = the address exactly as written (fixLazy needs it)
   }
   // WHY: the short form that most code needs. HOW: only the address.
   const imgAddress = (img, base) => imgAddressInfo(img, base).url;

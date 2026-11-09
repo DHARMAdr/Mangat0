@@ -1,7 +1,7 @@
 # MANGAFLOW — Project Reference, Code Map & Build History
 *GitHub repo: https://github.com/DHARMAdr/Mangat0 · Site: https://dharmadr.github.io/Mangat0/*
 *Cloudflare Workers: `worker.js` (page/image proxy) and `accounts-worker.js` (cloud profiles, D1 database)*
-*Last updated: Round 49 — 2026-11-09 · Only HTML, CSS and JavaScript are used (no build step, no frameworks).*
+*Last updated: Round 50 — 2026-11-09 · Only HTML, CSS and JavaScript are used (no build step, no frameworks).*
 
 > This ONE file replaces every older copy. It has (1) the page naming we use, (2) what every file is for, (3) for every part of every file **why it exists / how it works / how it can be improved**, (4) the complete history up to the latest round, (5) how to continue with Claude.
 
@@ -160,6 +160,9 @@ Cloudflare checklist: Worker deployed; D1 binding named exactly `DB`; variables 
 
 ## 4e. Round 49 — Owner's server address hidden (profiles.js, `?v=49`)
 The Server tab used to show the built-in accounts server address to anybody (a browser that once held the admin was remembered by `mf_admin_dev`). NOW the tab is visible to everyone (people may use their own server), but the real address is drawn ONLY while the signed-in person is the admin (`session.role === 'admin'`); others see an empty box and "built-in server in use". Leaving it empty keeps the built-in server working; anyone may save their own address (only in their own browser). HONEST LIMIT: the address still exists in `profiles.js` in the public repo; hiding it stops casual viewing only. Regression rule: never print `cloudUrl()` for a non-admin. Tested: guest with stale admin flag sees no address; signed-in admin does.
+
+## 4f. Round 50 — Chapter pages on Page 2 (the site view) show all pictures (app.js, `?v=50`)
+Report (comizy.io chapter): reading mode (Page 3) found the chapter, but the same page opened as a site (Page 2) had blank pictures. CAUSE: Page 2's `fixLazy()` only knew 5 lazy attribute names while reading mode's `imgAddressInfo()` knows many more and also scans every other attribute; and pictures whose address is only built by the site's script (pages 4+ had no address in the HTML) got nothing because Page 2 removes scripts. FIX: (1) `fixLazy()` now asks `imgAddressInfo()` whenever src is empty / a `data:` drawing / a loading placeholder; (2) before showing a page with 2+ empty picture slots, the caller reads the page's scripts as TEXT with `fromScripts()` (or the full `chapterPictures()` finder, max 6 s) and `renderFrame(doc, base, extraPics)` hands those addresses, in order, to the empty slots only. Never runs the site's code. Tested with a mock page: 3 attribute styles + 3 script-only pictures all load. Not tested on the real comizy.io (my workspace cannot open it). Regression rule: Page 2 and Page 3 must use the SAME address finder (`imgAddressInfo`). If a site's pictures still stay blank on Page 2, the picture host probably refuses outside referrers; the page's image-retry-through-proxy step (section 7b) is the next place to look.
 
 ### Open items (not changed)
 - Bookmark deleted in profile can reappear from the cloud until the next state push (push right after delete).
