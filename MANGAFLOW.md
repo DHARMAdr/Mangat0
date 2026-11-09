@@ -1,7 +1,7 @@
 # MANGAFLOW — Project Reference, Code Map & Build History
 *GitHub repo: https://github.com/DHARMAdr/Mangat0 · Site: https://dharmadr.github.io/Mangat0/*
 *Cloudflare Workers: `worker.js` (page/image proxy) and `accounts-worker.js` (cloud profiles, D1 database)*
-*Last updated: Round 50 — 2026-11-09 · Only HTML, CSS and JavaScript are used (no build step, no frameworks).*
+*Last updated: Round 51 — 2026-11-09 · Only HTML, CSS and JavaScript are used (no build step, no frameworks).*
 
 > This ONE file replaces every older copy. It has (1) the page naming we use, (2) what every file is for, (3) for every part of every file **why it exists / how it works / how it can be improved**, (4) the complete history up to the latest round, (5) how to continue with Claude.
 
@@ -163,6 +163,9 @@ The Server tab used to show the built-in accounts server address to anybody (a b
 
 ## 4f. Round 50 — Chapter pages on Page 2 (the site view) show all pictures (app.js, `?v=50`)
 Report (comizy.io chapter): reading mode (Page 3) found the chapter, but the same page opened as a site (Page 2) had blank pictures. CAUSE: Page 2's `fixLazy()` only knew 5 lazy attribute names while reading mode's `imgAddressInfo()` knows many more and also scans every other attribute; and pictures whose address is only built by the site's script (pages 4+ had no address in the HTML) got nothing because Page 2 removes scripts. FIX: (1) `fixLazy()` now asks `imgAddressInfo()` whenever src is empty / a `data:` drawing / a loading placeholder; (2) before showing a page with 2+ empty picture slots, the caller reads the page's scripts as TEXT with `fromScripts()` (or the full `chapterPictures()` finder, max 6 s) and `renderFrame(doc, base, extraPics)` hands those addresses, in order, to the empty slots only. Never runs the site's code. Tested with a mock page: 3 attribute styles + 3 script-only pictures all load. Not tested on the real comizy.io (my workspace cannot open it). Regression rule: Page 2 and Page 3 must use the SAME address finder (`imgAddressInfo`). If a site's pictures still stay blank on Page 2, the picture host probably refuses outside referrers; the page's image-retry-through-proxy step (section 7b) is the next place to look.
+
+## 4g. Round 51 — Site-view pictures blocked by "hotlink" protection (app.js, `?v=51`)
+Round 50 did not cure comizy.io. Likely cause found by reading the code: Page 2's picture-retry (a) ran only for errors AFTER its listener existed, but a hotlink-refused picture fails in milliseconds, before the listener is attached, so the retry never happened; (b) used the FIRST proxy of the list with no Referer, while hosts like cmzcdn.org answer only when the request says it comes from the chapter page (reading mode uses YOUR OWN proxy + `&ref=<page address>`). FIX: `retryFrameImg()` (own proxy + `&ref=`), `sweepFrameImgs()` retries pictures that already failed (when the frame is hooked, when it finishes loading, and after 3 s). The diagnostic report has a new line "Site view pictures (round 51): N pictures, X loaded, Y without address, Z retried through the proxy, first failing host: …" — if chapters are still blank, copy the report WHILE the chapter is open on Page 2 and send it: that line says which of the causes remains. Tested with a mock whose picture host refuses everything except the proxy: before the fix all six blank, after all six load. Not verified on the real comizy.io.
 
 ### Open items (not changed)
 - Bookmark deleted in profile can reappear from the cloud until the next state push (push right after delete).

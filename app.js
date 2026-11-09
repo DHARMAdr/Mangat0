@@ -1820,12 +1820,10 @@
     d.addEventListener('auxclick', e => { if (e.target.closest && e.target.closest('a')) e.preventDefault(); }, true);   // middle click
     // ROUND 25: image loading - images that fail to load are retried through the proxy
     // WHY: some sites block cross-origin image requests. HOW: when an image fails, try loading it through the proxy.
-    d.addEventListener('error', e => {
-      if (e.target.tagName === 'IMG' && e.target.src && !/^(data:|blob:)/.test(e.target.src) && !e.target.dataset.mfRetried) {
-        const proxyUrl = (settings.proxies && settings.proxies[0] || '').replace('{url}', encodeURIComponent(e.target.src));
-        if (proxyUrl && proxyUrl !== e.target.src) { e.target.src = proxyUrl; e.target.dataset.mfRetried = '1'; }
-      }
-    }, true);
+    d.addEventListener('error', e => { if (e.target.tagName === 'IMG') retryFrameImg(e.target); }, true);
+    // ROUND 51: pictures that ALREADY failed before this listener existed (a hotlink-blocked picture fails within milliseconds, the listener is attached later) were never retried,
+    //   which left whole chapters blank. HOW: sweep the document now, again when the frame finishes loading, and once more after 3 seconds.
+    sweepFrameImgs(d); setTimeout(() => sweepFrameImgs(d), 3000);
     // WHY: catch form submits such as search boxes. HOW: capture mode again.
     d.addEventListener('submit', onFrameSubmit, true);
     // WHY: tell the person when the page tried to run a blocked script. HOW: the browser sends a securitypolicyviolation
@@ -1837,6 +1835,18 @@
     // WHY: add chapter list and shortcuts if data is already known. HOW: applyLive is below.
     applyLive(d);
   }
+  // ROUND 51 — retry ONE broken picture of the site view through the proxy, with the page address as Referer (see the long note where the 'error' listener is attached).
+  function retryFrameImg(img) {
+    if (!img || !img.src || /^(data:|blob:)/.test(img.src) || img.dataset.mfRetried) return;
+    // ROUND 51 (comizy.io chapters stayed blank on Page 2): the old retry used the FIRST proxy in the list (often a public one that cannot send a Referer) and no Referer at all,
+    //   but picture hosts like cmzcdn.org only answer when the request says it comes from the chapter page. Reading mode (Page 3) uses YOUR OWN proxy plus &ref=<page address>;
+    //   Page 2 now does the same. HOW: own = first proxy that is not a built-in default (falls back to the first one); ref = the page's address. IMPROVE: also try the other proxies one by one.
+    const orig = img.src, own = (proxyList(false).find(p => !DEFAULT_PROXIES.includes(p))) || (settings.proxies && settings.proxies[0]) || '';
+    const proxyUrl = own.replace('{url}', encodeURIComponent(orig)) + (cur && cur.url && own.includes('workers.dev') ? '&ref=' + encodeURIComponent(cur.url) : '');
+    if (own && proxyUrl !== orig) { img.dataset.mfOrig = orig; img.src = proxyUrl; img.dataset.mfRetried = '1'; }
+  }
+  // WHY: find pictures that failed earlier. HOW: complete + naturalWidth 0 means "tried and failed". IMPROVE: stagger the retries on huge pages.
+  function sweepFrameImgs(d) { try { Array.from(d.images || []).forEach(i => { if (i.complete && !i.naturalWidth && i.getAttribute('src')) retryFrameImg(i); }); } catch { /* ignore */ } }
   // ROUND 44 — PAGE 2 SCROLL-HIDE (header + floating buttons).
   // WHY: on Page 2 (an outside site shown in MangaFlow's mini-browser) the header and the round buttons always covered
   //   the page. Earlier rounds (41/42) wrongly wrote that this is impossible; it is not: the page lives in a same-origin
@@ -1872,7 +1882,7 @@
     }, { passive: true });
   }
   // WHY: backup in case the timer missed. HOW: the iframe load event calls hookDoc, which ignores repeats.
-  frame.addEventListener('load', () => hookDoc(frame.contentDocument));  // backup
+  frame.addEventListener('load', () => { hookDoc(frame.contentDocument); try { sweepFrameImgs(frame.contentDocument); } catch { /* ignore */ } });  // backup (+ round 51: retry pictures that failed before we were listening)
 
   // Put the chapter list / shortcuts into the document that is on screen right now.
   // WHY: add chapters, shortcuts and link changes to the page that is on screen now. HOW: stop if no chapters are known
@@ -4996,6 +5006,17 @@
   function routeStatText() {
     return routeStats.size ? [...routeStats].map(([n, x]) => n + ' ok ' + x.ok + '/fail ' + x.fail + (x.ok ? ' avg ' + Math.round(x.ms / x.ok) + 'ms' : '')).join(' · ') : 'no picture requests yet';
   }
+  // ROUND 51 — WHY: when a chapter looked empty on Page 2 the report said nothing about it (reading mode worked, so "none" problems). HOW: counts the pictures in the site view:
+  //   total, loaded, still empty (no address), retried through the proxy and the first failing address (host only). IMPROVE: show it in a small overlay too.
+  function pageViewPicText() {
+    try {
+      if (frame.hidden || !frame.contentDocument) return 'not on a site page';
+      const im = Array.from(frame.contentDocument.images || []); if (!im.length) return 'no pictures on this page';
+      const ok = im.filter(i => i.complete && i.naturalWidth > 20).length, noAddr = im.filter(i => !(i.getAttribute('src') || '').trim()).length, retried = im.filter(i => i.dataset.mfRetried).length;
+      const bad = im.find(i => (i.getAttribute('src') || '').trim() && i.complete && !i.naturalWidth), host = bad ? (() => { try { return new URL(bad.dataset.mfOrig || bad.src).hostname; } catch { return '?'; } })() : '-';
+      return im.length + ' pictures, ' + ok + ' loaded, ' + noAddr + ' without address, ' + retried + ' retried through the proxy, first failing host: ' + host;
+    } catch (e) { return 'unknown (' + (e && e.message) + ')'; }
+  }
   /* The ways to get a picture's bytes. Your own proxy gets &ref=<chapter address> so picture hosts that check the
      "Referer" accept the request (round 8). Free public proxies do not get it (they would ignore or mishandle it). */
   // WHY: Builds the list of ways to download a picture. HOW: First direct, then each proxy (own proxies also get the
@@ -6737,6 +6758,7 @@
     // WHY: one check row per download job. HOW: a job that failed or stalled is marked red.
     jobs.forEach(j => row(j.status === 'error' || j.stalled ? false : null, 'Download #' + j.id + ': ' + j.status + (j.stalled ? ' (STALLED)' : '') + ' · ' + (j.text || '')));
     row(null, 'Picture routes: ' + routeStatText());
+    row(null, 'Site view pictures (round 51): ' + pageViewPicText());
     row(null, 'Memory: ' + heapText() + ' · PDF picture quality: ' + settings.pdfMode);
     return rows;
   }
@@ -6787,7 +6809,7 @@
       'Human check (round 29e): ' + (humanHosts.size ? [...humanHosts.keys()].join(', ') + ' waiting' : 'no site waiting'),
       'Search engine: ' + settings.searchEngine + ' (strict ' + !!settings.engineStrict + '), Google ID ' + (settings.googleCx || 'none') + ', last Google result: ' + (googleLast || 'no Google search yet') + ', blocked by page rules: ' + (Array.from(cspSeen).join(', ') || 'nothing'),
       'Profile: ' + (PF && PF.user() ? PF.user() + ' (' + PF.role() + ')' : 'not signed in') + ', sync: ' + (si && si.ok !== null ? (si.ok ? 'OK ' : 'FAILED ' + si.err + ' ') + new Date(si.t).toLocaleTimeString() : 'nothing sent yet'),
-      'Picture routes: ' + routeStatText(), 'Memory: ' + heapText(),
+      'Picture routes: ' + routeStatText(), 'Site view pictures (round 51): ' + pageViewPicText(), 'Memory: ' + heapText(),
       'Downloads: ' + (jobs.map(j => '#' + j.id + ' ' + j.status + ' ' + (j.pct || 0) + '% ' + (j.text || '')).join(' | ') || 'none'),
       extra || '',
       '--- last problems (newest last) ---', errLog.slice(-4).map(e => e.report).join('\n\n=====\n') || 'none',
