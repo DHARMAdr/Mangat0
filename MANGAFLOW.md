@@ -1,7 +1,7 @@
 # MANGAFLOW — Project Reference, Code Map & Build History
 *GitHub repo: https://github.com/DHARMAdr/Mangat0 · Site: https://dharmadr.github.io/Mangat0/*
 *Cloudflare Workers: `worker.js` (page/image proxy) and `accounts-worker.js` (cloud profiles, D1 database)*
-*Last updated: Round 47 — 2026-11-09 · Only HTML, CSS and JavaScript are used (no build step, no frameworks).*
+*Last updated: Round 49 — 2026-11-09 · Only HTML, CSS and JavaScript are used (no build step, no frameworks).*
 
 > This ONE file replaces every older copy. It has (1) the page naming we use, (2) what every file is for, (3) for every part of every file **why it exists / how it works / how it can be improved**, (4) the complete history up to the latest round, (5) how to continue with Claude.
 
@@ -157,6 +157,9 @@ Tests used: Playwright with mocked proxies (Pixel 7 and iPhone 13 emulation, Asi
 
 Report: "page loaded 5 times in 27 s" + admin sign-in "does not submit". Findings: (1) the sign-in code itself works — tested in a phone-size browser with a mock accounts server (sign-in, reload, session saved, no errors), and with the server answering 500 / 403 / offline (each shows a message). A successful sign-in reloads the page ONCE by design, and the reload guard counted the person's own refreshes/retries as a "loop" (report said "none written" = nothing automatic). (2) So the likely cause is on the Cloudflare side (Worker down, variables, D1 binding, origin list, or the name locked for 15 minutes after 5 wrong codes). Changes: errors now say the usual cause in plain words (`hintFor`); a **Check server** button on the sign-in screen says only "Server connected successfully" (round 48: it no longer shows the address, version or delay, for security); the Sign-in button shows "Signing in…" and ignores a second tap; the loop report explains that own refreshes count.
 Cloudflare checklist: Worker deployed; D1 binding named exactly `DB`; variables `ADMIN_USER` (text) and `ADMIN_CODE` (secret, 6 digits); optional `ALLOWED_ORIGINS` = `https://dharmadr.github.io`; open `<worker address>/ping` in a browser tab — it must show version 4; wait 15 minutes if the name was locked.
+
+## 4e. Round 49 — Owner's server address hidden (profiles.js, `?v=49`)
+The Server tab used to show the built-in accounts server address to anybody (a browser that once held the admin was remembered by `mf_admin_dev`). NOW the tab is visible to everyone (people may use their own server), but the real address is drawn ONLY while the signed-in person is the admin (`session.role === 'admin'`); others see an empty box and "built-in server in use". Leaving it empty keeps the built-in server working; anyone may save their own address (only in their own browser). HONEST LIMIT: the address still exists in `profiles.js` in the public repo; hiding it stops casual viewing only. Regression rule: never print `cloudUrl()` for a non-admin. Tested: guest with stale admin flag sees no address; signed-in admin does.
 
 ### Open items (not changed)
 - Bookmark deleted in profile can reappear from the cloud until the next state push (push right after delete).

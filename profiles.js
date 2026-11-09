@@ -590,8 +590,8 @@
     if (!session) {
       const create = view.tab === 'create';
       h += '<div class="mfp-top">' + avatar('', true) + '<div class="grow"><h3>MangaFlow profile</h3><p class="mfp-note">Sign in to keep your own reading history and bookmarks.</p></div></div>' +
-        '<div class="mfp-tabs"><button data-act="tab" data-v="in" class="' + (view.tab === 'in' ? 'on' : '') + '">Sign in</button><button data-act="tab" data-v="create" class="' + (create ? 'on' : '') + '">Create profile</button>' + (adminDev() ? '<button data-act="tab" data-v="server" class="' + (view.tab === 'server' ? 'on' : '') + '">Server</button>' : '') + '</div>' + msg;
-      if (view.tab === 'server' && adminDev()) h += serverHtml();
+        '<div class="mfp-tabs"><button data-act="tab" data-v="in" class="' + (view.tab === 'in' ? 'on' : '') + '">Sign in</button><button data-act="tab" data-v="create" class="' + (create ? 'on' : '') + '">Create profile</button>' + (true ? '<button data-act="tab" data-v="server" class="' + (view.tab === 'server' ? 'on' : '') + '">Server</button>' : '') + '</div>' + msg;
+      if (view.tab === 'server') h += serverHtml();
       else h += '<form data-act="go" autocomplete="off" novalidate><label for="mfpUser">Username</label><input type="text" id="mfpUser" name="mfpuser" maxlength="20" autocapitalize="none" spellcheck="false" placeholder="3-20 letters or digits">' +
         '<label for="mfpCode">6-digit code</label><input type="password" id="mfpCode" class="mfp-code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" placeholder="••••••" autocomplete="off">' +
         (create ? '<p class="mfp-note">By creating a profile you agree that MangaFlow saves your <b>history</b> (manga names, chapters, download events, times) and your <b>bookmarks</b> in it, and that the <b>admin of this site can see them</b>. ' + (cloud ? 'They are stored on the accounts server.' : 'Without a server they stay in this browser only.') + ' The bookmarks you have now are copied into the new profile.</p>' : '') +
@@ -655,11 +655,18 @@
   // WHY: the "Server" tab: the address box AND the step-by-step setup list, so linking the cloud needs no other document.
   function serverHtml() {
     const synced = session && session.cloud ? LS.get(atKey(), 0) : 0;
-    return '<label for="mfpUrl">Accounts server address (optional)</label><input type="url" id="mfpUrl" placeholder="https://mangaflow-accounts.YOURNAME.workers.dev" value="' + esc(cloudUrl()) + '" spellcheck="false">' +
+    // ROUND 49 — THE SITE OWNER'S SERVER ADDRESS IS PRIVATE. WHY: this tab used to show cloudUrl() (the owner's built-in accounts server) to anybody, even before sign-in,
+    //   because a browser that had once held the admin was remembered by mf_admin_dev. HOW: the real address is drawn ONLY while the signed-in person is the admin (session.role === 'admin').
+    //   Everybody else sees an empty box (or just the address THEY saved themselves, mf_acct_url) and the status sentence "built-in server" — without any address.
+    //   Everyone can still type and save their OWN server here, and with an empty box the built-in server keeps working. HONEST LIMIT: this is a static site, so the address is still
+    //   inside profiles.js in the public repository; hiding it on screen stops casual viewing, not someone who reads the source. IMPROVE: keep the address only in a Worker secret and give the site a short alias.
+    const isAdmin = !!(session && session.role === 'admin'), own = LS.get('mf_acct_url', '');
+    const shown = isAdmin ? cloudUrl() : own;
+    return '<label for="mfpUrl">Accounts server address (optional)</label><input type="url" id="mfpUrl" placeholder="' + (isAdmin ? 'https://mangaflow-accounts.YOURNAME.workers.dev' : 'Leave empty to use the built-in server, or paste your own') + '" value="' + esc(shown) + '" spellcheck="false" autocomplete="off">' +
       // WHY: the address box buttons. HOW: Save stores the Worker address, Test calls /ping to check it. IMPROVE: test
       // automatically after Save.
       '<div class="mfp-row"><button class="mfp-btn small" data-act="saveurl">Save</button><button class="mfp-btn ghost small" data-act="testurl">Test</button></div>' +
-      '<p class="mfp-note">Status: <b>' + (cloudUrl() ? 'server address set' + (synced ? ' · last sync ' + ago(synced) : '') : 'not linked (profiles stay in this browser)') + '</b>. Changing the address signs you out.</p>' +
+      '<p class="mfp-note">Status: <b>' + (cloudUrl() ? (own ? 'your own server is set' : 'built-in server in use') + (synced ? ' · last sync ' + ago(synced) : '') : 'not linked (profiles stay in this browser)') + '</b>. Changing the address signs you out.</p>' +
       '<h3>Link your own cloud (about 6 minutes, free)</h3><ol class="mfp-steps">' +
       '<li>Cloudflare dashboard &gt; <b>Storage &amp; databases &gt; D1 SQL database &gt; Create</b>. Name it <code>mangaflow</code>.</li>' +
       '<li><b>Workers &amp; Pages &gt; Create &gt; Worker</b>. Name it <code>mangaflow-accounts</code>, press Deploy, then <b>Edit code</b>, delete the sample and paste the code (button below). Deploy.</li>' +
@@ -926,8 +933,7 @@
         let code = ''; try { const r = await fetch('accounts-worker.js', { cache: 'no-store' }); if (!r.ok) throw 0; code = await r.text(); } catch { throw new Error('accounts-worker.js is not next to index.html on this site. Upload it to GitHub, then try again.'); }
         await navigator.clipboard.writeText(code); setMsg('Worker code copied. Paste it in step 2.', true);
       }
-      else if (act === 'saveurl' && !adminDev()) { throw new Error('Only the admin can change the server.'); }
-      else if (act === 'saveurl') { const v = ($('#mfpUrl').value || '').trim().replace(/\/+$/, ''); if (v && !/^https:\/\//i.test(v)) throw new Error('The address must start with https://'); if (v) LS.set('mf_acct_url', v); else LS.del('mf_acct_url'); if (session) { session = null; LS.del('mf_session'); } setMsg(v ? 'Server saved. Please sign in again.' : 'Server removed: profiles stay in this browser.', true); view.tab = 'in'; }
+      else if (act === 'saveurl') { const v = ($('#mfpUrl').value || '').trim().replace(/\/+$/, ''); if (v && !/^https:\/\//i.test(v)) throw new Error('The address must start with https://'); if (v) LS.set('mf_acct_url', v); else LS.del('mf_acct_url'); if (session) { session = null; LS.del('mf_session'); } setMsg(v ? 'Server saved. Please sign in again.' : (cloudUrl() ? 'Your own server was removed: the built-in server is used again.' : 'Server removed: profiles stay in this browser.'), true); view.tab = 'in'; }
       else if (act === 'testurl') { const v = ($('#mfpUrl').value || '').trim().replace(/\/+$/, ''); const old = LS.get('mf_acct_url', ''); LS.set('mf_acct_url', v); try { const r = await post('/ping', {}); setMsg('Server answered: ' + (r.admin ? 'ready, admin is set.' : 'ready, but ADMIN_USER / ADMIN_CODE are not set.'), true); } catch (err) { setMsg(err.message); } if (old) LS.set('mf_acct_url', old); else LS.del('mf_acct_url'); }
     } catch (err) { setMsg(err.message); }
     // ROUND 38: use safeRender() instead of render() — the lock prevents race conditions on rapid clicks.
