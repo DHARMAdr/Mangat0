@@ -1,7 +1,7 @@
 # MANGAFLOW — Project Reference, Code Map & Build History
 *GitHub repo: https://github.com/DHARMAdr/Mangat0 · Site: https://dharmadr.github.io/Mangat0/*
 *Cloudflare Workers: `worker.js` (page/image proxy) and `accounts-worker.js` (cloud profiles, D1 database)*
-*Last updated: Round 51 — 2026-11-09 · Only HTML, CSS and JavaScript are used (no build step, no frameworks).*
+*Last updated: Round 52 — 2026-11-09 · Only HTML, CSS and JavaScript are used (no build step, no frameworks).*
 
 > This ONE file replaces every older copy. It has (1) the page naming we use, (2) what every file is for, (3) for every part of every file **why it exists / how it works / how it can be improved**, (4) the complete history up to the latest round, (5) how to continue with Claude.
 
@@ -166,6 +166,10 @@ Report (comizy.io chapter): reading mode (Page 3) found the chapter, but the sam
 
 ## 4g. Round 51 — Site-view pictures blocked by "hotlink" protection (app.js, `?v=51`)
 Round 50 did not cure comizy.io. Likely cause found by reading the code: Page 2's picture-retry (a) ran only for errors AFTER its listener existed, but a hotlink-refused picture fails in milliseconds, before the listener is attached, so the retry never happened; (b) used the FIRST proxy of the list with no Referer, while hosts like cmzcdn.org answer only when the request says it comes from the chapter page (reading mode uses YOUR OWN proxy + `&ref=<page address>`). FIX: `retryFrameImg()` (own proxy + `&ref=`), `sweepFrameImgs()` retries pictures that already failed (when the frame is hooked, when it finishes loading, and after 3 s). The diagnostic report has a new line "Site view pictures (round 51): N pictures, X loaded, Y without address, Z retried through the proxy, first failing host: …" — if chapters are still blank, copy the report WHILE the chapter is open on Page 2 and send it: that line says which of the causes remains. Tested with a mock whose picture host refuses everything except the proxy: before the fix all six blank, after all six load. Not verified on the real comizy.io.
+
+## 4h. Round 52 — Chapter boxes that stay empty/stuck + the debug kit (app.js, `?v=52`)
+Report: while reading, the first chapters showed but the 4th and 5th were missing until the site was reopened. Differential test (Round 43 files vs now, mock sites with plain / script-list / lazy pictures, 21-chapter list): identical results, so rounds 44-51 did NOT change normal chapter loading; the gap is a box that was never retried. CAUSE: the keeper (section 9b) healed only boxes flagged `data-failed`. A box that became EMPTY (fill replaced and never restarted) or stuck on its spinner had no flag, so nobody retried it. FIX: the keeper now flags a box seen empty for 20 s, or loading longer than 100 s (`_fillStart`), and step B refills it. Tested: two wiped boxes (4th, 5th) refilled by themselves within 40 s. NEW REPORT LINE: "Chapter boxes (round 52): list N chapters, boxes M | Chapter 4: 8 pictures | Chapter 5: EMPTY …" — if it happens again, copy the report while it is visible and send it.
+**Debug kit** (outside the site, in `mangaflow-debug-kit.zip`): Playwright scripts with mock sites — `t10` Page 2 scroll-hide, `t11` profile history/date filter/Download buttons, `t14` refresh/Home/address, `t15-17` sign-in + server tab, `t18/t19` Page 2 pictures + hotlink retry, `t20` old-vs-new differential on chapter loading, `t21` self-heal. Run `node tNN.js <port>` with `python3 -m http.server <port>` in the project folder. Rule: before every release run them all.
 
 ### Open items (not changed)
 - Bookmark deleted in profile can reappear from the cloud until the next state push (push right after delete).

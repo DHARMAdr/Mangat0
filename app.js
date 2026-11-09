@@ -4088,7 +4088,7 @@
   // WHY: Download one chapter and show its pictures. HOW: see steps below. IMPROVE: split into smaller helpers.
   async function fillChapter(sec, i, gen) {
     // ROUND 43: two fills of the same box (reload pressed while still loading, or the keeper) used to BOTH add the pictures = every page twice. Only the newest call may touch the box.
-    const tok = sec._fillTok = {};
+    const tok = sec._fillTok = {}; sec._fillStart = Date.now();   // ROUND 52: the keeper uses _fillStart to spot a box that has been "loading" for too long
     // WHY: Get the chapter data. HOW: from R.chapters.
     const ch = R.chapters[i];
     // WHY: Clear old messages and pictures, free memory. HOW: remove old nodes and revoke blob addresses.
@@ -4224,7 +4224,7 @@
       } else keepNote.textContent = 'MangaFlow keeps trying again by itself in the background.';
       wait.appendChild(keepNote);
     // WHY: Stop the timer. HOW: finally.
-    } finally { stopWatch(); }
+    } finally { stopWatch(); if (sec._fillTok === tok) sec._fillStart = 0; }
   }
 
   /* Image element (round 8: more ways to load, and a visible Retry).
@@ -4375,6 +4375,17 @@
           fillChapter(bad, +bad.dataset.index, R.gen).catch(() => {}).finally(() => { keeper.busyCh--; if (bad.isConnected && bad.dataset.failed !== '1') keeper.healedCh++; });
         }
       }
+      // ROUND 52 — CHAPTER BOXES THAT ARE NEITHER LOADED NOR FAILED (reported: "chapters 4 and 5 are missing until I reload from the site").
+      // WHY: the keeper above only healed boxes that carry data-failed. A box that ended up EMPTY (a fill that was replaced and never restarted, a message that was wiped) or STUCK on its
+      //   spinner (an answer that never came, over 100 s) carried no flag, so nobody ever retried it; only a manual reload helped. HOW: an empty box seen empty for 20 s, or a spinner older
+      //   than 100 s, is flagged data-failed; step B then refills it like any failed chapter (growing waits; fillChapter's token makes sure only the newest fill touches the box).
+      //   IMPROVE: show the reason in the box ("waiting for the site").
+      secs.forEach(x => {
+        if (x.dataset.failed === '1' || x.dataset.verify) { x._emptyAt = 0; return; }
+        const hasPics = x.querySelector('img.page, .page-fail'), hasMsg = x.querySelector('.ch-msg');
+        if (x._fillStart && now - x._fillStart > 100000) { x.dataset.failed = '1'; x._healAt = 0; x._emptyAt = 0; return; }
+        if (!x._fillStart && !hasPics && !hasMsg) { if (!x._emptyAt) x._emptyAt = now; else if (now - x._emptyAt > 20000) { x.dataset.failed = '1'; x._healAt = 0; x._emptyAt = 0; } } else x._emptyAt = 0;
+      });
       const imgs = secs.flatMap(x => $$('img.page', x));
       // C. heal pictures: failed ones whose waiting time is over (3 at a time), and stalled ones (loading for more than 45 s)
       let busy = imgs.filter(i => i._healing).length;
@@ -5008,6 +5019,22 @@
   }
   // ROUND 51 — WHY: when a chapter looked empty on Page 2 the report said nothing about it (reading mode worked, so "none" problems). HOW: counts the pictures in the site view:
   //   total, loaded, still empty (no address), retried through the proxy and the first failing address (host only). IMPROVE: show it in a small overlay too.
+  // ROUND 52 — ONE LINE PER CHAPTER BOX FOR THE REPORT. WHY: "chapters 4 and 5 are missing" could not be told apart from "site refused" or "list incomplete" because the report only
+  //   had totals. HOW: for each box: number, state (pictures N / loading Ns / failed / needs human check / EMPTY), so one copied report shows exactly what the reader holds.
+  //   IMPROVE: add the proxy that answered and the time it took.
+  function chapterHealthText() {
+    try {
+      if (reader.hidden) return 'not reading';
+      const secs = $$('.chapter', stream); if (!secs.length) return 'no chapter boxes';
+      const now = Date.now();
+      const rows = secs.map(x => {
+        const i = +x.dataset.index, n = x.querySelectorAll('img.page').length, bad = x.querySelectorAll('img.page').length && Array.from(x.querySelectorAll('img.page')).filter(m => m._failed).length;
+        const st = x.dataset.verify ? 'human check' : x.dataset.failed === '1' ? 'FAILED (keeper retries)' : x._fillStart ? 'loading ' + Math.round((now - x._fillStart) / 1000) + 's' : n ? n + ' pictures' + (bad ? ', ' + bad + ' failed' : '') : x.querySelector('.ch-msg') ? 'message shown' : 'EMPTY';
+        return (R.chapters[i] ? labelFor(i) : '#' + i) + ': ' + st;
+      });
+      return 'list ' + R.chapters.length + ' chapters, boxes ' + secs.length + ' | ' + rows.join(' | ');
+    } catch (e) { return 'unknown (' + (e && e.message) + ')'; }
+  }
   function pageViewPicText() {
     try {
       if (frame.hidden || !frame.contentDocument) return 'not on a site page';
@@ -6759,6 +6786,7 @@
     jobs.forEach(j => row(j.status === 'error' || j.stalled ? false : null, 'Download #' + j.id + ': ' + j.status + (j.stalled ? ' (STALLED)' : '') + ' · ' + (j.text || '')));
     row(null, 'Picture routes: ' + routeStatText());
     row(null, 'Site view pictures (round 51): ' + pageViewPicText());
+    row(null, 'Chapter boxes (round 52): ' + chapterHealthText());
     row(null, 'Memory: ' + heapText() + ' · PDF picture quality: ' + settings.pdfMode);
     return rows;
   }
@@ -6809,7 +6837,7 @@
       'Human check (round 29e): ' + (humanHosts.size ? [...humanHosts.keys()].join(', ') + ' waiting' : 'no site waiting'),
       'Search engine: ' + settings.searchEngine + ' (strict ' + !!settings.engineStrict + '), Google ID ' + (settings.googleCx || 'none') + ', last Google result: ' + (googleLast || 'no Google search yet') + ', blocked by page rules: ' + (Array.from(cspSeen).join(', ') || 'nothing'),
       'Profile: ' + (PF && PF.user() ? PF.user() + ' (' + PF.role() + ')' : 'not signed in') + ', sync: ' + (si && si.ok !== null ? (si.ok ? 'OK ' : 'FAILED ' + si.err + ' ') + new Date(si.t).toLocaleTimeString() : 'nothing sent yet'),
-      'Picture routes: ' + routeStatText(), 'Site view pictures (round 51): ' + pageViewPicText(), 'Memory: ' + heapText(),
+      'Picture routes: ' + routeStatText(), 'Site view pictures (round 51): ' + pageViewPicText(), 'Chapter boxes (round 52): ' + chapterHealthText(), 'Memory: ' + heapText(),
       'Downloads: ' + (jobs.map(j => '#' + j.id + ' ' + j.status + ' ' + (j.pct || 0) + '% ' + (j.text || '')).join(' | ') || 'none'),
       extra || '',
       '--- last problems (newest last) ---', errLog.slice(-4).map(e => e.report).join('\n\n=====\n') || 'none',
