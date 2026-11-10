@@ -67,7 +67,7 @@ The complete stylesheet is Part C, file `style.css` (about 1,400 lines, every ru
 # MANGAFLOW — Project Reference, Code Map & Build History
 *GitHub repo: https://github.com/DHARMAdr/Mangat0 · Site: https://dharmadr.github.io/Mangat0/*
 *Cloudflare Workers: `worker.js` (page/image proxy) and `accounts-worker.js` (cloud profiles, D1 database)*
-*Last updated: Round 57 — 2026-11-10 · Only HTML, CSS and JavaScript are used (no build step, no frameworks).*
+*Last updated: Round 58 — 2026-11-10 · Only HTML, CSS and JavaScript are used (no build step, no frameworks).*
 
 > This ONE file replaces every older copy. It has (1) the page naming we use, (2) what every file is for, (3) for every part of every file **why it exists / how it works / how it can be improved**, (4) the complete history up to the latest round, (5) how to continue with Claude.
 
@@ -268,6 +268,11 @@ Report: arenascan.com `the-real-tycoon-all-by-myself-chapter-19`: Page 2 showed 
 2. Chapter-audit verification (round 55) removed a guessed chapter when its page answered but showed no pictures in the HTML. Now only a real "not found" removes a chapter: HTTP 404/410, or a page titled 404/not found that does not mention the chapter number. A page that answers is kept and tried when reached.
 3. Diagnostic reports now have "Site view chapter list (round 57)": chapters known, number range, whether the background reader has finished, and the banner text.
 NEXT STEP if it happens again: send the report copied (a) from the error pop-up "Chapter check" if shown, and (b) while reading, so the lines "Chapter audit (round 55)" and "Site view chapter list (round 57)" show the real numbers.
+
+## 4n. Round 58 — arenascan "dead" Prev/Next links (`#/prev/`, `#/next/`) (app.js, `?v=58`)
+Facts read from the real site (WebFetch): chapter pages hold their pictures in plain `<img>` tags (chapter 19: 20 `.webp` on cdn.arenascan.com; chapter 2: 16 numbered `.jpg`), but **Prev / Next are `<a href="#/prev/">` / `<a href="#/next/">`** (wired by the site's script) and the series page `/manga/<slug>/` has a static list 1..32 with a dead "First Chapter" link `#/`.
+Reproduced with a faithful mock (`work/audit/arena2.js`): clicking the site's own Next on Page 2 showed an error pop-up and the frame went cross-origin (the `#/…` address resolved against the real site). FIX: `isDeadAnchor()` (href empty, `#...`, `javascript:`) - such links are handled by the button bridge: words from the href text ("#/next/" -> "next"), the label and class names decide next / previous / list, then `openNavTarget()` opens the real chapter. `markNavControls()` also scans these anchors, so the tiny fallback bar is not shown when the site has its own. After the fix: site Next on chapter 19 opens chapter 20; reading mode lists 32 chapters.
+NOT reproduced: "reading shows chapter 1 then 20" and empty chapter boxes (mock opens 1..32 fine). If it returns, send the report copied while reading (lines "Chapter boxes", "Chapter audit", "Site view chapter list", "Picture routes").
 
 ### Open items (not changed)
 - Bookmark deleted in profile can reappear from the cloud until the next state push (push right after delete).
@@ -719,17 +724,17 @@ Each file has: a short introduction (why it exists), then the code between BEGIN
        carriers/browsers, can keep serving an OLD cached copy of style.css / app.js / profiles.js / etc. for a
        while after a new version is deployed, because every round reused the exact same file name and address,
        which is the one thing a cache uses to decide "have I already got this?". WHY the fix: every local
-       stylesheet/script tag below now ends in "?v=57" — changing that number is a tiny edit to THIS file, but it
+       stylesheet/script tag below now ends in "?v=58" — changing that number is a tiny edit to THIS file, but it
        makes the browser treat it as a brand-new address it has never cached before, forcing a fresh download
        every time, with no stale leftovers possible, regardless of how long a phone or carrier would otherwise
-       hold onto the old copy. HOW TO KEEP THIS WORKING: bump every "?v=57" below to the new round's number
+       hold onto the old copy. HOW TO KEEP THIS WORKING: bump every "?v=58" below to the new round's number
        whenever ANY of these specific files changes in a future round (a quick find-and-replace) — Claude will
        keep doing this automatically going forward. IMPROVE: a build step that computes this automatically from
        each file's own content hash, so it can never be forgotten by hand. -->
-  <link rel="stylesheet" href="style.css?v=57">
+  <link rel="stylesheet" href="style.css?v=58">
   <!-- ROUND 29: boot.js runs BEFORE the first paint. WHY: so a refresh / reopen shows the cover "Reopening where you were..." (below) and the saved dark theme at once,
        instead of flashing the start page while the big app.js loads. HOW: it only reads the address and the saved settings. IMPROVE: none needed. It is safe to remove (the flash returns). -->
-  <script src="boot.js?v=57"></script>
+  <script src="boot.js?v=58"></script>
 </head>
 <body data-side="right">
 
@@ -1300,24 +1305,24 @@ Each file has: a short introduction (why it exists), then the code between BEGIN
   </dialog>
 
   <!-- pdfmaker.js must come BEFORE app.js (app.js uses MangaPDFLib). -->
-  <script src="pdfmaker.js?v=57"></script>
+  <script src="pdfmaker.js?v=58"></script>
   <!-- ROUND 11 (OPTIONAL): the texts of the troubleshoot guide. Without this file the guide is empty; the checks still work. Load it BEFORE app.js. -->
-  <script src="troubleshoot-data.js?v=57"></script>
-  <script src="app.js?v=57"></script>
+  <script src="troubleshoot-data.js?v=58"></script>
+  <script src="app.js?v=58"></script>
   <!-- ROUND 10 (OPTIONAL): the chapter slider on the right edge. Delete this one line (or the file) and the slider is simply gone;
        nothing else needs it. It talks to app.js only through the browser event "mf-chapter-step". -->
-  <script src="chapter-slider.js?v=57"></script>
+  <script src="chapter-slider.js?v=58"></script>
   <!-- ROUND 11 (OPTIONAL): the reload wheel on the left edge (turn right = reload this chapter, turn left = reload all). Same rule:
        delete this line (or the file) and it is gone. It talks to app.js only through the event "mf-reload". -->
-  <script src="reload-wheel.js?v=57"></script>
+  <script src="reload-wheel.js?v=58"></script>
   <!-- ROUND 18 (OPTIONAL): the Top / End slider on the left edge, above the reload wheel. Delete this line (or the file) and the Top / End keys stay. -->
-  <script src="edge-slider.js?v=57"></script>
+  <script src="edge-slider.js?v=58"></script>
   <!-- ROUND 32 (OPTIONAL): the Translate button (文A, left edge) and its engine. It needs the folder ocr/ (text reader + language files). Delete this line and the
        button, the Settings tab and every translation feature are simply gone; nothing else needs it. It talks to app.js only through the events mf-settings,
        mf-settings-set and mf-translate-problem. -->
-  <script src="translate.js?v=57"></script>
+  <script src="translate.js?v=58"></script>
   <!-- ROUND 13: optional profile icon + sign-in + admin view (delete this line and profiles.js to remove the feature) -->
-  <script src="profiles.js?v=57"></script>
+  <script src="profiles.js?v=58"></script>
 </body>
 </html>
 ~~~~~~
@@ -3589,7 +3594,7 @@ window.MF_FIX = {
 <!-- END FILE -->
 
 
-### File: `app.js`  (7855 lines)
+### File: `app.js`  (7864 lines)
 
 **Why this file exists / what it does:** THE MAIN PROGRAM (about 7,800 lines): proxies and fetching, page analysis, chapter detection, the mini-browser (Page 2), reading mode (Page 3), downloads, settings, keyboard shortcuts, error reports, the chapter audit and the button bridge.
 
@@ -5533,8 +5538,16 @@ window.MF_FIX = {
     prev: /(^|[^a-z])(prev|previous|prv|back-chapter)([^a-z]|$)/i,
     list: /(chapter[-_ ]?(list|select|menu|dropdown|picker)|chapters?[-_ ]?(btn|button|toggle|drawer)|episode[-_ ]?list|toc)/i
   };
+  // ROUND 58: a "dead" link = an <a> whose address does nothing without the site's script ("#", "#/", "#/next/", "javascript:void(0)"). arenascan's Prev / Next are exactly these ("#/prev/", "#/next/"),
+  // so the normal link code could not open anything and the frame even tried to leave the page. They are treated like script buttons: their WORDS (and the address text) say next / previous.
+  function isDeadAnchor(el) {
+    if (!el || el.tagName !== 'A') return false;
+    const h = (el.getAttribute('data-mf-href') || el.getAttribute('href') || '').trim();
+    return h === '' || /^#/.test(h) || /^javascript:/i.test(h);
+  }
   function isButtonLike(el) {
     if (!el || el.nodeType !== 1) return false;
+    if (isDeadAnchor(el)) return true;
     const t = el.tagName;
     if (/^(BUTTON|SUMMARY)$/.test(t) || el.hasAttribute('onclick') || el.hasAttribute('tabindex')) return true;
     const role = (el.getAttribute('role') || '').toLowerCase(); if (role === 'button' || role === 'link' || role === 'menuitem' || role === 'tab') return true;
@@ -5546,7 +5559,8 @@ window.MF_FIX = {
     let svgTitle = ''; try { const t = el.querySelector('svg title'); svgTitle = t ? t.textContent : ''; } catch { /* ignore */ }
     let alt = ''; try { const i = el.querySelector('img[alt]'); alt = i ? i.getAttribute('alt') : ''; } catch { /* ignore */ }
     const text = (el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 60);
-    const strong = [g('aria-label'), g('title'), g('alt'), g('data-title'), g('data-tooltip'), g('name'), g('value'), alt, svgTitle, text].join(' | ');
+    const hrefWords = isDeadAnchor(el) ? (el.getAttribute('data-mf-href') || el.getAttribute('href') || '').replace(/[#/_-]+/g, ' ') : '';   // ROUND 58: "#/next/" -> "next"
+    const strong = [hrefWords, g('aria-label'), g('title'), g('alt'), g('data-title'), g('data-tooltip'), g('name'), g('value'), alt, svgTitle, text].join(' | ');
     const weak = [el.id, typeof el.className === 'string' ? el.className : g('class'), g('data-testid'), g('data-action'), g('aria-controls')].join(' ');
     return { strong, weak, text };
   }
@@ -5630,7 +5644,7 @@ window.MF_FIX = {
       // a control that simply carries an address in a data attribute
       const du = el.getAttribute && (el.getAttribute('data-href') || el.getAttribute('data-url') || el.getAttribute('data-link') || el.getAttribute('data-target-url'));
       if (du && !el.closest('a[href]') && !/^(javascript|data|blob|mailto|tel):/i.test(du)) { const u = absUrl(du, cur.base); if (u) { e.preventDefault(); e.stopPropagation(); navigate(unwrap(u)); return true; } }
-      if (el.closest && el.closest('a[href]') ) return false;                         // a real link: the normal code handles it
+      if (el.closest && el.closest('a[href]') && !isDeadAnchor(el.closest('a[href]'))) return false;   // a real link: the normal code handles it (ROUND 58: dead links are handled here)
       if (!onChapterPage()) return false;
       const kind = classifyControl(el);
       if (kind) { e.preventDefault(); e.stopPropagation(); openNavTarget(kind); return true; }
@@ -5642,7 +5656,7 @@ window.MF_FIX = {
     let n = 0;
     try {
       const w = d.defaultView;
-      d.querySelectorAll('button,[role=button],[onclick],[tabindex],summary,div,span').forEach(el => {
+      d.querySelectorAll('button,[role=button],[onclick],[tabindex],summary,div,span,a[href^="#"],a[href^="javascript:"]').forEach(el => {
         if (el.dataset && el.dataset.mfNav) { n++; return; }
         if (!isButtonLike(el)) return;
         if (el.querySelector && el.querySelector('button,[role=button]')) return;     // only the innermost control

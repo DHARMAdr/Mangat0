@@ -1,7 +1,7 @@
 # MANGAFLOW — Project Reference, Code Map & Build History
 *GitHub repo: https://github.com/DHARMAdr/Mangat0 · Site: https://dharmadr.github.io/Mangat0/*
 *Cloudflare Workers: `worker.js` (page/image proxy) and `accounts-worker.js` (cloud profiles, D1 database)*
-*Last updated: Round 57 — 2026-11-10 · Only HTML, CSS and JavaScript are used (no build step, no frameworks).*
+*Last updated: Round 58 — 2026-11-10 · Only HTML, CSS and JavaScript are used (no build step, no frameworks).*
 
 > This ONE file replaces every older copy. It has (1) the page naming we use, (2) what every file is for, (3) for every part of every file **why it exists / how it works / how it can be improved**, (4) the complete history up to the latest round, (5) how to continue with Claude.
 
@@ -202,6 +202,11 @@ Report: arenascan.com `the-real-tycoon-all-by-myself-chapter-19`: Page 2 showed 
 2. Chapter-audit verification (round 55) removed a guessed chapter when its page answered but showed no pictures in the HTML. Now only a real "not found" removes a chapter: HTTP 404/410, or a page titled 404/not found that does not mention the chapter number. A page that answers is kept and tried when reached.
 3. Diagnostic reports now have "Site view chapter list (round 57)": chapters known, number range, whether the background reader has finished, and the banner text.
 NEXT STEP if it happens again: send the report copied (a) from the error pop-up "Chapter check" if shown, and (b) while reading, so the lines "Chapter audit (round 55)" and "Site view chapter list (round 57)" show the real numbers.
+
+## 4n. Round 58 — arenascan "dead" Prev/Next links (`#/prev/`, `#/next/`) (app.js, `?v=58`)
+Facts read from the real site (WebFetch): chapter pages hold their pictures in plain `<img>` tags (chapter 19: 20 `.webp` on cdn.arenascan.com; chapter 2: 16 numbered `.jpg`), but **Prev / Next are `<a href="#/prev/">` / `<a href="#/next/">`** (wired by the site's script) and the series page `/manga/<slug>/` has a static list 1..32 with a dead "First Chapter" link `#/`.
+Reproduced with a faithful mock (`work/audit/arena2.js`): clicking the site's own Next on Page 2 showed an error pop-up and the frame went cross-origin (the `#/…` address resolved against the real site). FIX: `isDeadAnchor()` (href empty, `#...`, `javascript:`) - such links are handled by the button bridge: words from the href text ("#/next/" -> "next"), the label and class names decide next / previous / list, then `openNavTarget()` opens the real chapter. `markNavControls()` also scans these anchors, so the tiny fallback bar is not shown when the site has its own. After the fix: site Next on chapter 19 opens chapter 20; reading mode lists 32 chapters.
+NOT reproduced: "reading shows chapter 1 then 20" and empty chapter boxes (mock opens 1..32 fine). If it returns, send the report copied while reading (lines "Chapter boxes", "Chapter audit", "Site view chapter list", "Picture routes").
 
 ### Open items (not changed)
 - Bookmark deleted in profile can reappear from the cloud until the next state push (push right after delete).

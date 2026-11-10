@@ -1936,8 +1936,16 @@
     prev: /(^|[^a-z])(prev|previous|prv|back-chapter)([^a-z]|$)/i,
     list: /(chapter[-_ ]?(list|select|menu|dropdown|picker)|chapters?[-_ ]?(btn|button|toggle|drawer)|episode[-_ ]?list|toc)/i
   };
+  // ROUND 58: a "dead" link = an <a> whose address does nothing without the site's script ("#", "#/", "#/next/", "javascript:void(0)"). arenascan's Prev / Next are exactly these ("#/prev/", "#/next/"),
+  // so the normal link code could not open anything and the frame even tried to leave the page. They are treated like script buttons: their WORDS (and the address text) say next / previous.
+  function isDeadAnchor(el) {
+    if (!el || el.tagName !== 'A') return false;
+    const h = (el.getAttribute('data-mf-href') || el.getAttribute('href') || '').trim();
+    return h === '' || /^#/.test(h) || /^javascript:/i.test(h);
+  }
   function isButtonLike(el) {
     if (!el || el.nodeType !== 1) return false;
+    if (isDeadAnchor(el)) return true;
     const t = el.tagName;
     if (/^(BUTTON|SUMMARY)$/.test(t) || el.hasAttribute('onclick') || el.hasAttribute('tabindex')) return true;
     const role = (el.getAttribute('role') || '').toLowerCase(); if (role === 'button' || role === 'link' || role === 'menuitem' || role === 'tab') return true;
@@ -1949,7 +1957,8 @@
     let svgTitle = ''; try { const t = el.querySelector('svg title'); svgTitle = t ? t.textContent : ''; } catch { /* ignore */ }
     let alt = ''; try { const i = el.querySelector('img[alt]'); alt = i ? i.getAttribute('alt') : ''; } catch { /* ignore */ }
     const text = (el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 60);
-    const strong = [g('aria-label'), g('title'), g('alt'), g('data-title'), g('data-tooltip'), g('name'), g('value'), alt, svgTitle, text].join(' | ');
+    const hrefWords = isDeadAnchor(el) ? (el.getAttribute('data-mf-href') || el.getAttribute('href') || '').replace(/[#/_-]+/g, ' ') : '';   // ROUND 58: "#/next/" -> "next"
+    const strong = [hrefWords, g('aria-label'), g('title'), g('alt'), g('data-title'), g('data-tooltip'), g('name'), g('value'), alt, svgTitle, text].join(' | ');
     const weak = [el.id, typeof el.className === 'string' ? el.className : g('class'), g('data-testid'), g('data-action'), g('aria-controls')].join(' ');
     return { strong, weak, text };
   }
@@ -2033,7 +2042,7 @@
       // a control that simply carries an address in a data attribute
       const du = el.getAttribute && (el.getAttribute('data-href') || el.getAttribute('data-url') || el.getAttribute('data-link') || el.getAttribute('data-target-url'));
       if (du && !el.closest('a[href]') && !/^(javascript|data|blob|mailto|tel):/i.test(du)) { const u = absUrl(du, cur.base); if (u) { e.preventDefault(); e.stopPropagation(); navigate(unwrap(u)); return true; } }
-      if (el.closest && el.closest('a[href]') ) return false;                         // a real link: the normal code handles it
+      if (el.closest && el.closest('a[href]') && !isDeadAnchor(el.closest('a[href]'))) return false;   // a real link: the normal code handles it (ROUND 58: dead links are handled here)
       if (!onChapterPage()) return false;
       const kind = classifyControl(el);
       if (kind) { e.preventDefault(); e.stopPropagation(); openNavTarget(kind); return true; }
@@ -2045,7 +2054,7 @@
     let n = 0;
     try {
       const w = d.defaultView;
-      d.querySelectorAll('button,[role=button],[onclick],[tabindex],summary,div,span').forEach(el => {
+      d.querySelectorAll('button,[role=button],[onclick],[tabindex],summary,div,span,a[href^="#"],a[href^="javascript:"]').forEach(el => {
         if (el.dataset && el.dataset.mfNav) { n++; return; }
         if (!isButtonLike(el)) return;
         if (el.querySelector && el.querySelector('button,[role=button]')) return;     // only the innermost control
