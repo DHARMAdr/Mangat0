@@ -67,7 +67,7 @@ The complete stylesheet is Part C, file `style.css` (about 1,400 lines, every ru
 # MANGAFLOW — Project Reference, Code Map & Build History
 *GitHub repo: https://github.com/DHARMAdr/Mangat0 · Site: https://dharmadr.github.io/Mangat0/*
 *Cloudflare Workers: `worker.js` (page/image proxy) and `accounts-worker.js` (cloud profiles, D1 database)*
-*Last updated: Round 58 — 2026-11-10 · Only HTML, CSS and JavaScript are used (no build step, no frameworks).*
+*Last updated: Round 59 — 2026-11-11 · Only HTML, CSS and JavaScript are used (no build step, no frameworks).*
 
 > This ONE file replaces every older copy. It has (1) the page naming we use, (2) what every file is for, (3) for every part of every file **why it exists / how it works / how it can be improved**, (4) the complete history up to the latest round, (5) how to continue with Claude.
 
@@ -281,6 +281,23 @@ NOT reproduced: "reading shows chapter 1 then 20" and empty chapter boxes (mock 
 - A real phone's native date picker cannot be driven by Playwright; the fix was verified by logic and emulation. If it still misbehaves on one specific phone, tell Claude the model + browser.
 
 ---
+
+
+## 4o. Round 59 — Page 2 spinner pictures + the Site-View Doctor in Troubleshoot (app.js, troubleshoot-data.js, index.html, `?v=59`)
+
+**Report (arenascan, 2026-11-10/11):** Page 2 (site view) of a chapter "keeps loading" and shows no chapters, while reading mode (Page 3) works perfectly. The report said "9 pictures, 9 loaded, 0 retried" — i.e. the pictures "loaded" but were not the chapter.
+
+**Root cause (found, reproduced with a mock, fixed):** the site (MangaStream/"mangareader" theme) puts a spinner drawing `readerarea.svg` in every picture slot and lets its own script (`ts_reader.run({... images:[...]})`) swap in the real pages. MangaFlow never runs a site's scripts. The "empty slot" rule only looked for slots with NO address, and a slot with `readerarea.svg` HAS an address, so nothing was filled and the spinner stayed for ever. Old code on the mock: 3 spinner pictures. New code: all 20 pages.
+
+**Fixes**
+1. `PLACEHOLDER_SRC` (new) recognises placeholder names (readerarea, blank, spacer, transparent, lazy, placeholder, loader, loading, spinner, 1x1...). They now count as EMPTY in `navigate()` (empty-slot rule), `fixLazy()` and the new `placePictures()`.
+2. `placePictures(d, base, pics)` (new, taken out of `renderFrame`): fills empty/placeholder slots in page order, then ADDS the pictures the reader finder knows but the page has no slot for (after the last real picture, same box). Also runs when the page shows 3 or more FEWER pictures than its own scripts list.
+3. **Site-View Doctor** (new, before `selfCheck`): `siteViewScan()` counts picture kinds (ok / placeholder / noaddr / failed / pending), asks the reader finder (`fromScripts`, `scanPictures`, `chapterPictures`) what the page SHOULD show and lists named problems: `P2-PLACEHOLDER`, `P2-MISSING`, `P2-FAILED`, `P2-STUCK-LOADING`, `P2-NOLIST`, `P2-NODOC`. `siteViewRepair()` repairs them (fill/add pictures, retry failed through proxies, switch off a never-ending loading bar/banner, load the chapter list from the series page). `siteViewFull()` builds the long detail report.
+4. **Settings > Troubleshoot:** "Run checks" now shows those problems; "Fix automatically" runs the doctor; if something cannot be repaired it builds the COMPLETE report (diagnostic + site-view detail: every picture with state/attribute/address/size, class names, script counts, CSP blocks, hash, screen), shows it in a new box (`#fixReport`) and copies it. "Copy full report" and "Send report to server" include the site-view detail. New repair button "Repair this site page" and a new symptom in the guide. Report headers now say "build round 59".
+
+**Tests (mock arenascan, Playwright):** old code = 3 spinners (reproduced); new = 20 pictures; healthy page shows "Site view looks right", no false alarm; broken page (spinners, 3 slots, loading bar stuck) is repaired by Fix automatically; page with spinners and no data anywhere produces the complete report.
+
+**IMPROVE:** add more placeholder names when a new site reports a spinner; add a screenshot hint to the report.
 
 ## How to Deploy / Set Up
 
@@ -655,7 +672,7 @@ Paste this file at the start of a new session to give Claude full context. Then 
 Each file has: a short introduction (why it exists), then the code between BEGIN/END markers. The code is the real file, byte for byte.
 
 
-### File: `index.html`  (665 lines)
+### File: `index.html`  (667 lines)
 
 **Why this file exists / what it does:** The page itself (Page 1 start page, Page 2 site view frame, Page 3 reading mode, all dialogs and settings). Loads every other file in a fixed order.
 
@@ -724,17 +741,17 @@ Each file has: a short introduction (why it exists), then the code between BEGIN
        carriers/browsers, can keep serving an OLD cached copy of style.css / app.js / profiles.js / etc. for a
        while after a new version is deployed, because every round reused the exact same file name and address,
        which is the one thing a cache uses to decide "have I already got this?". WHY the fix: every local
-       stylesheet/script tag below now ends in "?v=58" — changing that number is a tiny edit to THIS file, but it
+       stylesheet/script tag below now ends in "?v=59" — changing that number is a tiny edit to THIS file, but it
        makes the browser treat it as a brand-new address it has never cached before, forcing a fresh download
        every time, with no stale leftovers possible, regardless of how long a phone or carrier would otherwise
-       hold onto the old copy. HOW TO KEEP THIS WORKING: bump every "?v=58" below to the new round's number
+       hold onto the old copy. HOW TO KEEP THIS WORKING: bump every "?v=59" below to the new round's number
        whenever ANY of these specific files changes in a future round (a quick find-and-replace) — Claude will
        keep doing this automatically going forward. IMPROVE: a build step that computes this automatically from
        each file's own content hash, so it can never be forgotten by hand. -->
-  <link rel="stylesheet" href="style.css?v=58">
+  <link rel="stylesheet" href="style.css?v=59">
   <!-- ROUND 29: boot.js runs BEFORE the first paint. WHY: so a refresh / reopen shows the cover "Reopening where you were..." (below) and the saved dark theme at once,
        instead of flashing the start page while the big app.js loads. HOW: it only reads the address and the saved settings. IMPROVE: none needed. It is safe to remove (the flash returns). -->
-  <script src="boot.js?v=58"></script>
+  <script src="boot.js?v=59"></script>
 </head>
 <body data-side="right">
 
@@ -1274,6 +1291,8 @@ Each file has: a short introduction (why it exists), then the code between BEGIN
             <button type="button" id="fixCheck">Run checks</button>
           </div>
           <ul id="fixList" class="small"></ul>
+          <!-- ROUND 59: when Fix automatically cannot repair something, the complete report appears here (and is copied) so it can be pasted to Claude or any other AI. -->
+          <textarea id="fixReport" class="small" rows="8" readonly hidden style="width:100%" aria-label="Complete error report"></textarea>
           <div class="inline">
             <button type="button" id="fixOpen">Symptoms &amp; answers&hellip;</button>
             <button type="button" id="fixCopy">Copy full report</button>
@@ -1305,24 +1324,24 @@ Each file has: a short introduction (why it exists), then the code between BEGIN
   </dialog>
 
   <!-- pdfmaker.js must come BEFORE app.js (app.js uses MangaPDFLib). -->
-  <script src="pdfmaker.js?v=58"></script>
+  <script src="pdfmaker.js?v=59"></script>
   <!-- ROUND 11 (OPTIONAL): the texts of the troubleshoot guide. Without this file the guide is empty; the checks still work. Load it BEFORE app.js. -->
-  <script src="troubleshoot-data.js?v=58"></script>
-  <script src="app.js?v=58"></script>
+  <script src="troubleshoot-data.js?v=59"></script>
+  <script src="app.js?v=59"></script>
   <!-- ROUND 10 (OPTIONAL): the chapter slider on the right edge. Delete this one line (or the file) and the slider is simply gone;
        nothing else needs it. It talks to app.js only through the browser event "mf-chapter-step". -->
-  <script src="chapter-slider.js?v=58"></script>
+  <script src="chapter-slider.js?v=59"></script>
   <!-- ROUND 11 (OPTIONAL): the reload wheel on the left edge (turn right = reload this chapter, turn left = reload all). Same rule:
        delete this line (or the file) and it is gone. It talks to app.js only through the event "mf-reload". -->
-  <script src="reload-wheel.js?v=58"></script>
+  <script src="reload-wheel.js?v=59"></script>
   <!-- ROUND 18 (OPTIONAL): the Top / End slider on the left edge, above the reload wheel. Delete this line (or the file) and the Top / End keys stay. -->
-  <script src="edge-slider.js?v=58"></script>
+  <script src="edge-slider.js?v=59"></script>
   <!-- ROUND 32 (OPTIONAL): the Translate button (文A, left edge) and its engine. It needs the folder ocr/ (text reader + language files). Delete this line and the
        button, the Settings tab and every translation feature are simply gone; nothing else needs it. It talks to app.js only through the events mf-settings,
        mf-settings-set and mf-translate-problem. -->
-  <script src="translate.js?v=58"></script>
+  <script src="translate.js?v=59"></script>
   <!-- ROUND 13: optional profile icon + sign-in + admin view (delete this line and profiles.js to remove the feature) -->
-  <script src="profiles.js?v=58"></script>
+  <script src="profiles.js?v=59"></script>
 </body>
 </html>
 ~~~~~~
@@ -3419,7 +3438,7 @@ body.fs.fs-small #p2NavBar { display: none !important; }
 <!-- END FILE -->
 
 
-### File: `troubleshoot-data.js`  (166 lines)
+### File: `troubleshoot-data.js`  (171 lines)
 
 **Why this file exists / what it does:** Text data for Settings > Troubleshoot > Symptoms & answers (symptoms, causes, fixes, ready-made questions).
 
@@ -3444,7 +3463,12 @@ body.fs.fs-small #p2NavBar { display: none !important; }
             translate the texts into other languages.
    ===================================================================== */
 window.MF_FIX = {
-  SYMPTOMS: [                                                   // each one: what you see / why it may happen / what to press
+  SYMPTOMS: [
+    // ROUND 59: Page 2 (site view) shows spinners / no chapter pictures / loads for ever while reading mode works.
+    { id: 'p2empty', title: 'The site page (Page 2) keeps loading, shows only a spinner, or the chapter pictures are missing - but reading mode works',
+      why: 'Many sites put a spinner picture in every slot and let their own script swap in the real pages. MangaFlow never runs a site\'s scripts, so it must fill the slots itself. The repair button asks the same finder that reading mode uses and fills or adds the pictures.',
+      fix: ['siteView', 'clearCaches'], ask: 'noimages' },
+                                                  // each one: what you see / why it may happen / what to press
     { id: 'noimg', title: 'Red box: "no images found on this chapter page"',
       // WHY: the guide texts used by Settings > Troubleshoot. HOW: each entry has a symptom, a theory, steps and questions to
       // copy to Claude; app.js only reads this list. IMPROVE: add an entry whenever a new kind of site error appears.
@@ -3594,7 +3618,7 @@ window.MF_FIX = {
 <!-- END FILE -->
 
 
-### File: `app.js`  (7864 lines)
+### File: `app.js`  (7997 lines)
 
 **Why this file exists / what it does:** THE MAIN PROGRAM (about 7,800 lines): proxies and fetching, page analysis, chapter detection, the mini-browser (Page 2), reading mode (Page 3), downloads, settings, keyboard shortcuts, error reports, the chapter audit and the button bridge.
 
@@ -4489,7 +4513,7 @@ window.MF_FIX = {
     // time, problem, page, reading state, downloads, proxies, browser, extra details. IMPROVE: hide private parts of
     // addresses.
     const report = [
-      'MangaFlow error report (build round 31)',
+      'MangaFlow error report (build round 59)',
       'Time: ' + new Date().toString(),
       // WHY: the lines of the error report the person can copy. HOW: each line is 'Label: value'; they are joined with new
       // lines at the end.
@@ -4936,7 +4960,7 @@ window.MF_FIX = {
       //   function and copy what it finds into src. IMPROVE: keep one shared list so the two pages can never disagree again.
       try {
         const cs = (img.getAttribute('src') || '').trim();
-        if (!cs || cs.startsWith('data:') || BAD_IMG.test(cs)) { const info = imgAddressInfo(img, location.href); if (info.raw && info.attr !== 'src') img.setAttribute('src', info.raw); }
+        if (!cs || cs.startsWith('data:') || BAD_IMG.test(cs) || PLACEHOLDER_SRC.test(cs)) { const info = imgAddressInfo(img, location.href); if (info.raw && info.attr !== 'src') img.setAttribute('src', info.raw); }
       } catch { /* leave this picture as it is */ }
       // WHY: some sites give several sizes in data-srcset. HOW: copies it to srcset when present. IMPROVE: none needed.
       const ss = img.getAttribute('data-srcset'); if (ss) img.setAttribute('srcset', ss);
@@ -5165,6 +5189,29 @@ window.MF_FIX = {
     // where the icon DOES render (the outline is subtle and sits behind/around a real glyph without covering it).
     // IMPROVE: detect common icon-font unicode ranges and draw a plain geometric fallback shape instead of a box.
     '.fa:empty,.fas:empty,.far:empty,.fab:empty,.icon:empty,[class*="icon-"]:empty,.material-icons:empty{min-width:1.1em;min-height:1.1em;display:inline-block;outline:1px dashed currentColor;outline-offset:1px;opacity:.55;border-radius:3px}';
+  // ROUND 59: gives the chapter's real pictures to a page that shows spinners / empty slots / too few pictures. Used when the page is first shown AND by the troubleshooter
+  //   (repair on the page that is already on screen). Returns how many slots were filled and how many pictures were added. IMPROVE: keep the slot's original size.
+  function placePictures(d, base, extraPics) {
+    let filled = 0, added = 0;
+    if (!extraPics || !extraPics.length) return { filled, added };
+    try {
+      const imgs = Array.from(d.querySelectorAll('img')), have = new Set(imgs.map(i => absUrl((i.getAttribute('src') || '').trim(), base)).filter(Boolean));
+      const free = extraPics.filter(u => !have.has(u));
+      imgs.filter(i => { const cs = (i.getAttribute('src') || '').trim(); return (!cs || cs.startsWith('data:') || BAD_IMG.test(cs) || PLACEHOLDER_SRC.test(cs)) && (isHolder(i) || PLACEHOLDER_SRC.test(cs)); }).forEach((i, k) => { if (free[k]) { filled++; i.setAttribute('src', free[k]); i.removeAttribute('srcset'); i.setAttribute('referrerpolicy', 'no-referrer'); } });
+      // ROUND 59: pictures the scripts list but the page has no slot for are ADDED after the last real picture (same box), so the whole chapter shows on Page 2
+      if (extraPics.length >= 3) {
+        const used = new Set(Array.from(d.querySelectorAll('img')).map(i => absUrl((i.getAttribute('src') || '').trim(), base)).filter(Boolean));
+        const left = extraPics.filter(u => !used.has(u));
+        const real = Array.from(d.querySelectorAll('img')).filter(i => { const u = absUrl((i.getAttribute('src') || '').trim(), base); return u && !PLACEHOLDER_SRC.test(u) && isHolderOrPage(i); });
+        const anchor = real[real.length - 1];
+        if (left.length && anchor && anchor.parentNode) {
+          let ref = anchor;
+          left.forEach(u => { const n = d.createElement('img'); n.setAttribute('src', u); n.setAttribute('referrerpolicy', 'no-referrer'); n.setAttribute('data-mf-added', '1'); added++; n.style.cssText = 'display:block;max-width:100%;margin:0 auto'; ref.parentNode.insertBefore(n, ref.nextSibling); ref = n; });
+        }
+      }
+      return { filled: filled, added: added };
+    } catch { return { filled, added }; }
+  }
   function renderFrame(doc, base, extraPics) {
     // WHY: never change the original saved page. HOW: cloneNode(true) makes a deep copy that we can edit freely.
     const d = doc.cloneNode(true);
@@ -5201,13 +5248,7 @@ window.MF_FIX = {
     // ROUND 50: pictures that have NO address anywhere in the page (their address is built by the site's script, like comizy.io pages 4 and up) get the addresses that reading mode's
     //   detector found in the page's scripts (extraPics, computed by the caller before scripts were removed). They are given out in page order to the empty slots only.
     //   IMPROVE: also keep the slot's original size so the page does not jump when the picture arrives.
-    if (extraPics && extraPics.length) {
-      try {
-        const imgs = Array.from(d.querySelectorAll('img')), have = new Set(imgs.map(i => absUrl((i.getAttribute('src') || '').trim(), base)).filter(Boolean));
-        const free = extraPics.filter(u => !have.has(u));
-        imgs.filter(i => { const cs = (i.getAttribute('src') || '').trim(); return (!cs || cs.startsWith('data:') || BAD_IMG.test(cs)) && isHolder(i); }).forEach((i, k) => { if (free[k]) { i.setAttribute('src', free[k]); i.removeAttribute('srcset'); i.setAttribute('referrerpolicy', 'no-referrer'); } });
-      } catch { /* the page still shows without them */ }
-    }
+    if (extraPics && extraPics.length) placePictures(d, base, extraPics);
     // WHY: if the chapter list is already known (for example after a reload), add it right now. HOW: only runs when cur has
     // a non-empty chapters list.
     if (cur && cur.chapters && cur.chapters.length) { injectChapters(d, cur); fixShortcuts(d, cur.chapters); }   // known already (e.g. page reload)
@@ -5912,8 +5953,13 @@ window.MF_FIX = {
       // ROUND 50: a page with several empty picture slots (script-built chapter) borrows the reader's picture finder, but only for that case and never longer than 6 seconds.
       let extra = null;
       try {
-        const empties = Array.from(doc.querySelectorAll('img')).filter(i => !imgAddress(i, base) && isHolder(i)).length;
-        if (empties >= 2 && !isSearch) {
+        const allImgs = Array.from(doc.querySelectorAll('img'));
+        const empties = allImgs.filter(i => (!imgAddress(i, base) || PLACEHOLDER_SRC.test(i.getAttribute('src') || '')) && (isHolder(i) || PLACEHOLDER_SRC.test(i.getAttribute('src') || ''))).length;
+        const realCount = allImgs.filter(i => { const u = imgAddress(i, base); return u && !PLACEHOLDER_SRC.test(u) && !BAD_IMG.test(u); }).length;
+        // ROUND 59: also when the page shows FEWER pictures than its own scripts list (a reader that only writes the first few into the page)
+        let scriptMore = false;
+        if (!isSearch && empties < 2) { const js0 = fromScripts(doc, base); scriptMore = js0.length >= 3 && js0.length >= realCount + 3; }
+        if ((empties >= 2 || scriptMore) && !isSearch) {
           // 1) the quick way: a list of picture addresses written inside the page's own scripts (the page's scripts are only READ as text, never run)
           const js = fromScripts(doc, base);
           if (js.length >= 3) extra = js;
@@ -6306,6 +6352,10 @@ window.MF_FIX = {
   // WHY: skip pictures that are not manga pages (logos, ads, icons, small thumbs). HOW: a pattern on the address. IMPROVE:
   // add more words as you meet new sites.
   const BAD_IMG = /logo|banner|avatar|icon|sprite|\bads?[-_/.]|advert|loading|gravatar|emoji|placeholder|button|badge|thumb-?small|[-_]\d{2,3}x\d{2,3}\.(?:jpe?g|png|webp)/i;
+  // ROUND 59 (arenascan chapter pages showed only a spinning "loading" picture on Page 2, owner reports 2026-11-10/11): many reader themes put a placeholder drawing (readerarea.svg,
+  //   blank.gif, spinner, loader...) in every picture slot and let a script swap in the real page later. Our frame runs no scripts, so the spinner stayed for ever ("keeps loading")
+  //   and, because the slot HAD an address, the "empty slot" rule never fired. HOW: this test recognises such placeholder addresses so they count as EMPTY. IMPROVE: add more names.
+  const PLACEHOLDER_SRC = /readerarea|(?:^|[\/_.-])(?:blank|spacer|pixel|transparent|dummy|lazy(?:load)?|placeholder|loader|loading|spinner|preload)[\w.-]*\.(?:svg|gif|png|webp|jpe?g)(?:[?#]|$)|\b1x1\b/i;
   // WHY: tell if an address is a picture. HOW: pattern for common picture endings.
   const IMG_EXT = /\.(?:jpe?g|png|webp|avif|gif)(?:[?#]|$)/i;
   // WHY: srcset lists pictures by size. HOW: split by comma, take each address, return the last (biggest).
@@ -6465,6 +6515,7 @@ window.MF_FIX = {
   const imgAddress = (img, base) => imgAddressInfo(img, base).url;
   // WHY: an <img> without an address can still be the room of a page. HOW: three signs: (1) a big size written on the tag or INSIDE the empty drawing (the page is 800 wide and
   // thousands of pixels tall), (2) the alt text says "Image 3" / "Page 3", (3) loading=lazy and nothing in src. Tiny pictures (icons) never count. IMPROVE: add more signs.
+  const isHolderOrPage = i => { const w = parseInt(i.getAttribute('width') || '0', 10); return !(w && w < 150) && !BAD_IMG.test(i.getAttribute('src') || ''); };   // ROUND 59: a normal-sized picture
   function isHolder(img) {
     const w = parseInt(img.getAttribute('width') || '0', 10), h = parseInt(img.getAttribute('height') || '0', 10);
     if ((w && w < 150) || (h && h < 150)) return false;                    // tiny = an icon, not a page
@@ -10645,6 +10696,8 @@ window.MF_FIX = {
       return 'Page cache, picture routes, request limits and size estimates were reset.'; } },
     // WHY: Retry broken pictures in one go. HOW: finds the first button of each failed picture box and clicks it. IMPROVE:
     // add a delay between retries.
+    // ROUND 59: repair the site view (Page 2) on its own: placeholders, missing pictures, endless loading, empty chapter list.
+    siteView: { label: 'Repair this site page', run: async () => (await siteViewRepair()).lines.join(' ') },
     retryPictures: { label: 'Retry failed pictures', run: async () => {
       const btns = $$('.page-fail .row button:first-child'); btns.forEach(b => b.click());
       return btns.length ? 'Retrying ' + btns.length + ' picture' + (btns.length === 1 ? '' : 's') + '.' : 'No failed pictures on the page.'; } },
@@ -10685,6 +10738,99 @@ window.MF_FIX = {
   };
   // WHY: Make a health report. HOW: rows is a list of results; row(ok, text) adds one. First checks online state,
   // pdfmaker.js, compression support, WebP conversion and storage access. IMPROVE: group rows by topic.
+  /* ROUND 59 - THE SITE-VIEW DOCTOR (Page 2). WHY: the owner's arenascan chapter showed spinners / nothing on Page 2 while reading mode (Page 3) worked, and the old
+          troubleshooter could not see it (it only counted pictures that "loaded" - a spinner picture loads fine). HOW: siteViewScan() LOOKS at the page on screen and compares it with
+          what the reader's own finder knows (fromScripts / scanPictures / chapterPictures). It lists named problems (codes P2-...). siteViewRepair() fixes what can be fixed:
+          fills placeholder slots, adds missing pictures, retries failed ones through the proxies, switches off a loading bar/banner that never ends, asks for the chapter list again.
+          siteViewFull() is the long report that is used when something could not be fixed. IMPROVE: add a code for every new site problem that is reported. */
+  async function siteViewScan(deep) {
+    const r = { on: false, problems: [], counts: {}, finder: {}, notes: [], pics: [] };
+    try {
+      if (frame.hidden || !cur || cur.isSearch) return r;
+      const d = frame.contentDocument; if (!d) { r.problems.push({ code: 'P2-NODOC', text: 'The site view cannot be read (the page frame has no document).', fix: false }); r.on = true; return r; }
+      r.on = true;
+      const base = cur.base || cur.url, im = Array.from(d.images || []);
+      const kind = i => { const s = (i.getAttribute('src') || '').trim(); if (!s) return 'noaddr'; if (PLACEHOLDER_SRC.test(s)) return 'placeholder'; if (/^data:/i.test(s)) return 'datadrawing'; if (i.complete && !i.naturalWidth) return 'failed'; if (!i.complete) return 'pending'; return i.naturalWidth > 20 ? 'ok' : 'tiny'; };
+      const c = r.counts; c.total = im.length; im.forEach(i => { const k = kind(i); c[k] = (c[k] || 0) + 1; });
+      // what the reading pipeline knows about the SAME page (page scripts are only read as text)
+      let js = [], sc = { list: [], how: '-' }, best = [];
+      try { js = fromScripts(cur.doc, base); } catch { /* none */ }
+      try { sc = scanPictures(cur.doc, base); } catch { /* none */ }
+      best = js.length >= sc.list.length ? js : sc.list;
+      if (deep && cur.doc) { try { const f = await Promise.race([chapterPictures(cur.doc, base, cur.url), new Promise(x => setTimeout(() => x(null), 8000))]); if (f && f.list && f.list.length > best.length) best = f.list; r.finder.how = f && f.how; } catch (e) { r.notes.push('chapterPictures failed: ' + (e && e.message)); } }
+      r.finder.scripts = js.length; r.finder.reader = sc.list.length; r.finder.readerHow = sc.how; r.finder.best = best.length; r.pics = best;
+      const shown = (c.ok || 0) + (c.pending || 0);
+      if ((c.placeholder || 0) + (c.noaddr || 0) > 0 && best.length >= 1) r.problems.push({ code: 'P2-PLACEHOLDER', text: ((c.placeholder || 0) + (c.noaddr || 0)) + ' picture slot(s) only show a placeholder/spinner or are empty, but the reader finder knows ' + best.length + ' real picture(s).', fix: true });
+      else if ((c.placeholder || 0) > 0) r.problems.push({ code: 'P2-PLACEHOLDER-NOSRC', text: (c.placeholder) + ' placeholder slot(s) and the finder found no real pictures.', fix: false });
+      if (best.length >= 3 && best.length >= shown + 3 && !((c.placeholder || 0) + (c.noaddr || 0) > 0 && shown + (c.placeholder || 0) + (c.noaddr || 0) >= best.length)) r.problems.push({ code: 'P2-MISSING', text: 'The page shows ' + shown + ' real picture(s) but the reader finder knows ' + best.length + '. Some pages of the chapter are missing here.', fix: true });
+      if ((c.failed || 0) > 0) r.problems.push({ code: 'P2-FAILED', text: (c.failed) + ' picture(s) failed to load (blocked or slow host).', fix: true });
+      // loading signs that never end
+      const barOn = $('#loadbar').classList.contains('on'), busyOn = !$('#busy').hidden;
+      const idle = cur.enhancingDone || !cur.enhancing;
+      c.loadbar = barOn; c.busy = busyOn; c.idle = !!idle;
+      if ((barOn || busyOn) && idle && !jobs.some(j => j.status === 'running') && reader.hidden) r.problems.push({ code: 'P2-STUCK-LOADING', text: 'A loading bar / "working" note is on although the page and its background work are finished.', fix: true });
+      // chapter page without a list
+      let isCh = false; try { isCh = looksLikeChapter(cur.doc, base, cur.url); } catch { /* unknown */ }
+      c.isChapter = isCh; c.listLen = cur.chapters ? cur.chapters.length : 0;
+      c.needList = !!(isCh && !c.listLen && idle);      // a chapter page normally has no list until it is asked for (the picker / reading mode load it on demand), so this is only a note here
+      // links that go nowhere
+      const dead = Array.from(d.querySelectorAll('a')).filter(a => { try { return isDeadAnchor(a); } catch { return false; } }).length; c.deadLinks = dead;
+      // things on the page that need scripts (they can never work in the frame)
+      c.scriptsRemoved = !d.querySelector('script'); c.csp = Array.from(cspSeen).join(', ') || 'none';
+    } catch (e) { r.problems.push({ code: 'P2-SCAN-ERROR', text: 'The site-view scan itself failed: ' + (e && e.message), fix: false }); }
+    SVD.last = r; return r;
+  }
+  const SVD = { last: null, fixed: [], failed: [] };
+  async function siteViewRepair() {
+    const out = [], r0 = await siteViewScan(true);
+    if (!r0.on) return { lines: ['Site view: nothing to repair (no site page is open).'], left: [], scan: r0 };
+    if (!r0.problems.length && !r0.counts.needList) return { lines: ['Site view: everything looks right (' + (r0.counts.ok || 0) + ' pictures loaded, finder knows ' + r0.finder.best + ').'], left: [], scan: r0 };
+    const d = frame.contentDocument, base = cur.base || cur.url, codes = r0.problems.map(p => p.code);
+    if (codes.some(x => x === 'P2-PLACEHOLDER' || x === 'P2-MISSING')) {
+      const res = placePictures(d, base, r0.pics);
+      out.push('Site view: filled ' + res.filled + ' empty slot(s) and added ' + res.added + ' missing picture(s) from the reader finder.');
+    }
+    if (codes.includes('P2-FAILED')) { try { sweepFrameImgs(d); out.push('Site view: retried the failed pictures through the proxies.'); } catch { /* ignore */ } }
+    if (codes.includes('P2-STUCK-LOADING')) { setLoading(false); setBusy(''); out.push('Site view: switched off a loading bar that never ended.'); }
+    let listFail = false;
+    if (r0.counts.needList) {
+      try {
+        const lr = await Promise.race([loadSeriesList(cur.doc, base, cur.url), new Promise(x => setTimeout(() => x(null), 20000))]);
+        if (lr && lr.chapters && lr.chapters.length >= 2) { cur.chapters = lr.chapters; try { applyLive(frame.contentDocument); } catch { /* the list is kept anyway */ } out.push('Site view: loaded the chapter list from the series page (' + lr.chapters.length + ' chapters).'); }
+        else { listFail = true; out.push('Site view: the chapter list could not be found on the series page.'); }
+      } catch (e) { listFail = true; out.push('Site view: the chapter list could not be fetched (' + (e && e.message) + ').'); }
+    }
+    if (codes.includes('P2-STUCK-LOADING')) { setLoading(false); setBusy(''); }       // the list loading above may switch the note on again: switch it off once more
+    await new Promise(x => setTimeout(x, 2500));            // give the new pictures a moment to load, then look again
+    const r1 = await siteViewScan(false), left = r1.problems.filter(p => !(p.code === 'P2-FAILED' && (r1.counts.failed || 0) === 0));
+    if (listFail) left.push({ code: 'P2-NOLIST', text: 'Chapter page without a findable chapter list.', fix: false });
+    out.push(left.length ? 'Site view: ' + left.length + ' problem(s) remain: ' + left.map(p => p.code).join(', ') : 'Site view: all problems repaired.');
+    SVD.fixed = r0.problems.filter(p => !left.some(l => l.code === p.code)).map(p => p.code); SVD.failed = left.map(p => p.code);
+    return { lines: out, left, scan: r1 };
+  }
+  // WHY: the "everything we know" report for a problem that could not be repaired. HOW: scan data, every picture (kind, address attribute, address, size), the page's own head (CSP, base), a script count,
+  //   proxy answers, the problem log. It is plain text so it can be pasted into any AI. IMPROVE: add a screenshot hint.
+  async function siteViewFull() {
+    const r = SVD.last || await siteViewScan(true), L = [];
+    L.push('=== SITE VIEW (Page 2) DETAIL ===', 'Page: ' + (cur ? cur.url : '-'), 'Scan: ' + JSON.stringify(r.counts), 'Reader finder: ' + JSON.stringify(r.finder));
+    L.push('Problems found: ' + (r.problems.map(p => p.code + ' - ' + p.text).join(' | ') || 'none'), 'Repaired: ' + (SVD.fixed.join(', ') || 'none') + ' · Not repaired: ' + (SVD.failed.join(', ') || 'none'));
+    try {
+      const d = frame.contentDocument;
+      if (d) {
+        L.push('Frame title: ' + d.title, 'Frame text length: ' + (d.body ? d.body.innerText.length : 0), 'Frame head meta: ' + Array.from(d.querySelectorAll('meta')).map(m => (m.httpEquiv || m.name || m.getAttribute('property') || '') + '=' + (m.content || '').slice(0, 60)).join(' ; '));
+        L.push('First 40 pictures (state | attribute used | address as written | natural size):');
+        Array.from(d.images).slice(0, 40).forEach((i, k) => { const inf = imgAddressInfo(i, cur.base || cur.url); L.push('  ' + (k + 1) + '. ' + (i.complete ? (i.naturalWidth ? 'loaded' : 'FAILED') : 'pending') + ' | ' + (inf.attr || 'none') + ' | ' + (i.getAttribute('src') || '').slice(0, 110) + ' | ' + i.naturalWidth + 'x' + i.naturalHeight + (i.dataset.mfAdded ? ' (added by MangaFlow)' : '')); });
+        const cls = {}; d.querySelectorAll('[class]').forEach(e => { String(e.className).split(/\s+/).forEach(n => { if (/load|spin|lazy|reader|chapter|page/i.test(n)) cls[n] = (cls[n] || 0) + 1; }); });
+        L.push('Useful class names on the page (name x count): ' + Object.entries(cls).slice(0, 30).map(e => e[0] + 'x' + e[1]).join(', '));
+      }
+      if (cur && cur.doc) {
+        const sc = Array.from(cur.doc.querySelectorAll('script')); L.push('Original page scripts: ' + sc.length + ' (' + sc.filter(s => !s.src).length + ' inline, ' + sc.filter(s => s.src).length + ' external). Picture words inside inline scripts: ' + sc.filter(s => /images?["']?\s*:|\.webp|\.jpe?g/i.test(s.textContent || '')).length);
+      }
+    } catch (e) { L.push('(detail failed: ' + (e && e.message) + ')'); }
+    L.push('Chapter list on site view: ' + pageListText(), 'Chapter audit: ' + chapterAuditText(), 'CSP blocks seen: ' + (Array.from(cspSeen).join(', ') || 'none'));
+    L.push('Address hash: ' + location.hash.slice(0, 160), 'Screen: ' + innerWidth + 'x' + innerHeight + ' dpr ' + devicePixelRatio);
+    return L.join('\n');
+  }
   async function selfCheck() {
     const rows = [], row = (ok, text) => rows.push({ ok, text });
     row(navigator.onLine, navigator.onLine ? 'The device says it is online.' : 'The device says it is OFFLINE. Check Wi-Fi / mobile data.');
@@ -10715,6 +10861,8 @@ window.MF_FIX = {
     jobs.forEach(j => row(j.status === 'error' || j.stalled ? false : null, 'Download #' + j.id + ': ' + j.status + (j.stalled ? ' (STALLED)' : '') + ' · ' + (j.text || '')));
     row(null, 'Picture routes: ' + routeStatText());
     row(null, 'Site view pictures (round 51): ' + pageViewPicText());
+    // ROUND 59: the site-view doctor - named problems with their codes (a green tick means "nothing found")
+    try { const sv = await siteViewScan(true); if (sv.on) { if (!sv.problems.length) row(true, 'Site view looks right: ' + (sv.counts.ok || 0) + ' pictures shown, reader finder knows ' + sv.finder.best + '.'); sv.problems.forEach(p => row(false, '[' + p.code + '] ' + p.text + (p.fix ? ' — "Fix automatically" can repair this.' : ' — needs a report.'))); } } catch (e) { row(false, 'Site view check failed: ' + (e && e.message)); }
     row(null, 'Chapter boxes (round 52): ' + chapterHealthText());
     row(null, 'Chapter audit (round 55): ' + chapterAuditText());
     row(null, 'Site view chapter list (round 57): ' + pageListText());
@@ -10743,10 +10891,19 @@ window.MF_FIX = {
       if (bad.length) { say('Reloading ' + bad.length + ' chapter box' + (bad.length === 1 ? '' : 'es') + ' that showed a message.'); reloadSections(bad); }
       if (performance && performance.memory && performance.memory.usedJSHeapSize > performance.memory.jsHeapSizeLimit * 0.6) say(await FIX.freeMemory.run());
     }
+    // ROUND 59: the site-view doctor. WHY: find and repair the problems that only show on Page 2 (spinners, missing pictures, never-ending loading, empty chapter list).
+    let svLeft = [];
+    try { const sv = await siteViewRepair(); sv.lines.forEach(say); svLeft = sv.left; } catch (e) { say('Site view repair failed: ' + (e && e.message)); }
     // WHY: Finish the auto repair. HOW: cancels stuck downloads and mentions it only if something was found, then prints the
     // final hint. IMPROVE: offer to copy the report automatically.
     const cs = await FIX.cancelStuck.run(); if (!/No stuck/.test(cs)) say(cs);
-    say('Done. If it still fails, press "Copy full report" and use a question from "Symptoms & answers".');
+    if (svLeft.length || errLog.length && Date.now() - errLog[errLog.length - 1].at < 120000) {
+      // ROUND 59: something could not be fixed -> build the COMPLETE report now (everything gathered), show it in the box and try to copy it.
+      log.push({ ok: false, text: 'Not everything could be repaired' + (svLeft.length ? ' (' + svLeft.map(p => p.code).join(', ') + ')' : '') + '. A complete error report was made for you (below) - paste it to Claude or any AI, or use "Send report to server".' });
+      paintRows(log, $('#fixList'));
+      const txt = diagnostic(await siteViewFull()), box = $('#fixReport'); if (box) { box.value = txt; box.hidden = false; }
+      try { await copyText(txt); } catch { /* the person can copy it from the box */ }
+    } else { const box = $('#fixReport'); if (box) { box.value = ''; box.hidden = true; } say('Done. Nothing is left that the checks can see. If it still fails, press "Copy full report".'); }
   }
   // WHY: Build the big report that is pasted into Claude questions. HOW: joins lines with time, page, browser, current
   // manga, settings, add-ons, routes, memory, downloads, last 4 problems and the latest download report. IMPROVE: hide
@@ -10754,7 +10911,7 @@ window.MF_FIX = {
   function diagnostic(extra) {
     // ROUND 21: the report now says which build it is, how Google search went last time and how the profile sync went, so a bug report shows the cause at once.
     const PF = window.MangaFlowProfiles, si = PF && PF.syncInfo ? PF.syncInfo() : null;
-    return ['MangaFlow diagnostic (build round 31)', 'Time: ' + new Date().toString(), 'App page: ' + location.href, 'Browser: ' + navigator.userAgent,
+    return ['MangaFlow diagnostic (build round 59)', 'Time: ' + new Date().toString(), 'App page: ' + location.href, 'Browser: ' + navigator.userAgent,
       'Manga page open: ' + (cur ? cur.url : '-'),
       // WHY: the reading state in the copy-for-Claude text. HOW: title, chapter number and total.
       'Reading: ' + (R.chapters && R.chapters.length ? R.title + ' | chapter ' + (R.cur + 1) + ' of ' + R.chapters.length : 'not reading'),
@@ -10820,12 +10977,12 @@ window.MF_FIX = {
   // it); Copy copies the report; Open draws the guide and shows the dialog. IMPROVE: show a spinner.
   $('#fixAuto').onclick = async e => { e.target.disabled = true; try { await autoFix(); } finally { e.target.disabled = false; } };
   $('#fixCheck').onclick = async e => { e.target.disabled = true; paintRows([{ ok: null, text: 'Checking…' }], $('#fixList')); try { paintRows(await selfCheck(), $('#fixList')); } finally { e.target.disabled = false; } };
-  $('#fixCopy').onclick = () => copyText(diagnostic());
+  $('#fixCopy').onclick = async () => copyText(diagnostic(await siteViewFull()));   // round 59: includes the site-view detail
   // ROUND 19: send the full diagnostic to the accounts server (profiles.js does the sending; it works signed in or not, with a limit of 3 per 10 minutes when not).
   // WHY: the owner wants every report on the server so the pages can be fixed from it. HOW: MangaFlowProfiles.sendReport(title, report, page).
   $('#fixSend').onclick = async () => {
     const P = window.MangaFlowProfiles; if (!P || !P.sendReport) { toast('The profile add-on (profiles.js) is not loaded'); return; }
-    try { await P.sendReport('Troubleshoot report', diagnostic(), cur && cur.url || location.href); toast('Report sent to the server. Thank you!'); }
+    try { await P.sendReport('Troubleshoot report', diagnostic(await siteViewFull()), cur && cur.url || location.href); toast('Report sent to the server. Thank you!'); }
     catch (e) { toast('Not sent: ' + clipText(e.message, 90)); }
   };
   // ROUND 19 (this code sits inside section 17; the Settings window has no section of its own): the Profile tab of Settings. WHY: reach the profile / sync from reading mode and from any page. HOW: buttons call the profiles.js doors.

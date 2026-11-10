@@ -887,7 +887,7 @@
     // time, problem, page, reading state, downloads, proxies, browser, extra details. IMPROVE: hide private parts of
     // addresses.
     const report = [
-      'MangaFlow error report (build round 31)',
+      'MangaFlow error report (build round 59)',
       'Time: ' + new Date().toString(),
       // WHY: the lines of the error report the person can copy. HOW: each line is 'Label: value'; they are joined with new
       // lines at the end.
@@ -1334,7 +1334,7 @@
       //   function and copy what it finds into src. IMPROVE: keep one shared list so the two pages can never disagree again.
       try {
         const cs = (img.getAttribute('src') || '').trim();
-        if (!cs || cs.startsWith('data:') || BAD_IMG.test(cs)) { const info = imgAddressInfo(img, location.href); if (info.raw && info.attr !== 'src') img.setAttribute('src', info.raw); }
+        if (!cs || cs.startsWith('data:') || BAD_IMG.test(cs) || PLACEHOLDER_SRC.test(cs)) { const info = imgAddressInfo(img, location.href); if (info.raw && info.attr !== 'src') img.setAttribute('src', info.raw); }
       } catch { /* leave this picture as it is */ }
       // WHY: some sites give several sizes in data-srcset. HOW: copies it to srcset when present. IMPROVE: none needed.
       const ss = img.getAttribute('data-srcset'); if (ss) img.setAttribute('srcset', ss);
@@ -1563,6 +1563,29 @@
     // where the icon DOES render (the outline is subtle and sits behind/around a real glyph without covering it).
     // IMPROVE: detect common icon-font unicode ranges and draw a plain geometric fallback shape instead of a box.
     '.fa:empty,.fas:empty,.far:empty,.fab:empty,.icon:empty,[class*="icon-"]:empty,.material-icons:empty{min-width:1.1em;min-height:1.1em;display:inline-block;outline:1px dashed currentColor;outline-offset:1px;opacity:.55;border-radius:3px}';
+  // ROUND 59: gives the chapter's real pictures to a page that shows spinners / empty slots / too few pictures. Used when the page is first shown AND by the troubleshooter
+  //   (repair on the page that is already on screen). Returns how many slots were filled and how many pictures were added. IMPROVE: keep the slot's original size.
+  function placePictures(d, base, extraPics) {
+    let filled = 0, added = 0;
+    if (!extraPics || !extraPics.length) return { filled, added };
+    try {
+      const imgs = Array.from(d.querySelectorAll('img')), have = new Set(imgs.map(i => absUrl((i.getAttribute('src') || '').trim(), base)).filter(Boolean));
+      const free = extraPics.filter(u => !have.has(u));
+      imgs.filter(i => { const cs = (i.getAttribute('src') || '').trim(); return (!cs || cs.startsWith('data:') || BAD_IMG.test(cs) || PLACEHOLDER_SRC.test(cs)) && (isHolder(i) || PLACEHOLDER_SRC.test(cs)); }).forEach((i, k) => { if (free[k]) { filled++; i.setAttribute('src', free[k]); i.removeAttribute('srcset'); i.setAttribute('referrerpolicy', 'no-referrer'); } });
+      // ROUND 59: pictures the scripts list but the page has no slot for are ADDED after the last real picture (same box), so the whole chapter shows on Page 2
+      if (extraPics.length >= 3) {
+        const used = new Set(Array.from(d.querySelectorAll('img')).map(i => absUrl((i.getAttribute('src') || '').trim(), base)).filter(Boolean));
+        const left = extraPics.filter(u => !used.has(u));
+        const real = Array.from(d.querySelectorAll('img')).filter(i => { const u = absUrl((i.getAttribute('src') || '').trim(), base); return u && !PLACEHOLDER_SRC.test(u) && isHolderOrPage(i); });
+        const anchor = real[real.length - 1];
+        if (left.length && anchor && anchor.parentNode) {
+          let ref = anchor;
+          left.forEach(u => { const n = d.createElement('img'); n.setAttribute('src', u); n.setAttribute('referrerpolicy', 'no-referrer'); n.setAttribute('data-mf-added', '1'); added++; n.style.cssText = 'display:block;max-width:100%;margin:0 auto'; ref.parentNode.insertBefore(n, ref.nextSibling); ref = n; });
+        }
+      }
+      return { filled: filled, added: added };
+    } catch { return { filled, added }; }
+  }
   function renderFrame(doc, base, extraPics) {
     // WHY: never change the original saved page. HOW: cloneNode(true) makes a deep copy that we can edit freely.
     const d = doc.cloneNode(true);
@@ -1599,13 +1622,7 @@
     // ROUND 50: pictures that have NO address anywhere in the page (their address is built by the site's script, like comizy.io pages 4 and up) get the addresses that reading mode's
     //   detector found in the page's scripts (extraPics, computed by the caller before scripts were removed). They are given out in page order to the empty slots only.
     //   IMPROVE: also keep the slot's original size so the page does not jump when the picture arrives.
-    if (extraPics && extraPics.length) {
-      try {
-        const imgs = Array.from(d.querySelectorAll('img')), have = new Set(imgs.map(i => absUrl((i.getAttribute('src') || '').trim(), base)).filter(Boolean));
-        const free = extraPics.filter(u => !have.has(u));
-        imgs.filter(i => { const cs = (i.getAttribute('src') || '').trim(); return (!cs || cs.startsWith('data:') || BAD_IMG.test(cs)) && isHolder(i); }).forEach((i, k) => { if (free[k]) { i.setAttribute('src', free[k]); i.removeAttribute('srcset'); i.setAttribute('referrerpolicy', 'no-referrer'); } });
-      } catch { /* the page still shows without them */ }
-    }
+    if (extraPics && extraPics.length) placePictures(d, base, extraPics);
     // WHY: if the chapter list is already known (for example after a reload), add it right now. HOW: only runs when cur has
     // a non-empty chapters list.
     if (cur && cur.chapters && cur.chapters.length) { injectChapters(d, cur); fixShortcuts(d, cur.chapters); }   // known already (e.g. page reload)
@@ -2310,8 +2327,13 @@
       // ROUND 50: a page with several empty picture slots (script-built chapter) borrows the reader's picture finder, but only for that case and never longer than 6 seconds.
       let extra = null;
       try {
-        const empties = Array.from(doc.querySelectorAll('img')).filter(i => !imgAddress(i, base) && isHolder(i)).length;
-        if (empties >= 2 && !isSearch) {
+        const allImgs = Array.from(doc.querySelectorAll('img'));
+        const empties = allImgs.filter(i => (!imgAddress(i, base) || PLACEHOLDER_SRC.test(i.getAttribute('src') || '')) && (isHolder(i) || PLACEHOLDER_SRC.test(i.getAttribute('src') || ''))).length;
+        const realCount = allImgs.filter(i => { const u = imgAddress(i, base); return u && !PLACEHOLDER_SRC.test(u) && !BAD_IMG.test(u); }).length;
+        // ROUND 59: also when the page shows FEWER pictures than its own scripts list (a reader that only writes the first few into the page)
+        let scriptMore = false;
+        if (!isSearch && empties < 2) { const js0 = fromScripts(doc, base); scriptMore = js0.length >= 3 && js0.length >= realCount + 3; }
+        if ((empties >= 2 || scriptMore) && !isSearch) {
           // 1) the quick way: a list of picture addresses written inside the page's own scripts (the page's scripts are only READ as text, never run)
           const js = fromScripts(doc, base);
           if (js.length >= 3) extra = js;
@@ -2704,6 +2726,10 @@
   // WHY: skip pictures that are not manga pages (logos, ads, icons, small thumbs). HOW: a pattern on the address. IMPROVE:
   // add more words as you meet new sites.
   const BAD_IMG = /logo|banner|avatar|icon|sprite|\bads?[-_/.]|advert|loading|gravatar|emoji|placeholder|button|badge|thumb-?small|[-_]\d{2,3}x\d{2,3}\.(?:jpe?g|png|webp)/i;
+  // ROUND 59 (arenascan chapter pages showed only a spinning "loading" picture on Page 2, owner reports 2026-11-10/11): many reader themes put a placeholder drawing (readerarea.svg,
+  //   blank.gif, spinner, loader...) in every picture slot and let a script swap in the real page later. Our frame runs no scripts, so the spinner stayed for ever ("keeps loading")
+  //   and, because the slot HAD an address, the "empty slot" rule never fired. HOW: this test recognises such placeholder addresses so they count as EMPTY. IMPROVE: add more names.
+  const PLACEHOLDER_SRC = /readerarea|(?:^|[\/_.-])(?:blank|spacer|pixel|transparent|dummy|lazy(?:load)?|placeholder|loader|loading|spinner|preload)[\w.-]*\.(?:svg|gif|png|webp|jpe?g)(?:[?#]|$)|\b1x1\b/i;
   // WHY: tell if an address is a picture. HOW: pattern for common picture endings.
   const IMG_EXT = /\.(?:jpe?g|png|webp|avif|gif)(?:[?#]|$)/i;
   // WHY: srcset lists pictures by size. HOW: split by comma, take each address, return the last (biggest).
@@ -2863,6 +2889,7 @@
   const imgAddress = (img, base) => imgAddressInfo(img, base).url;
   // WHY: an <img> without an address can still be the room of a page. HOW: three signs: (1) a big size written on the tag or INSIDE the empty drawing (the page is 800 wide and
   // thousands of pixels tall), (2) the alt text says "Image 3" / "Page 3", (3) loading=lazy and nothing in src. Tiny pictures (icons) never count. IMPROVE: add more signs.
+  const isHolderOrPage = i => { const w = parseInt(i.getAttribute('width') || '0', 10); return !(w && w < 150) && !BAD_IMG.test(i.getAttribute('src') || ''); };   // ROUND 59: a normal-sized picture
   function isHolder(img) {
     const w = parseInt(img.getAttribute('width') || '0', 10), h = parseInt(img.getAttribute('height') || '0', 10);
     if ((w && w < 150) || (h && h < 150)) return false;                    // tiny = an icon, not a page
@@ -7043,6 +7070,8 @@
       return 'Page cache, picture routes, request limits and size estimates were reset.'; } },
     // WHY: Retry broken pictures in one go. HOW: finds the first button of each failed picture box and clicks it. IMPROVE:
     // add a delay between retries.
+    // ROUND 59: repair the site view (Page 2) on its own: placeholders, missing pictures, endless loading, empty chapter list.
+    siteView: { label: 'Repair this site page', run: async () => (await siteViewRepair()).lines.join(' ') },
     retryPictures: { label: 'Retry failed pictures', run: async () => {
       const btns = $$('.page-fail .row button:first-child'); btns.forEach(b => b.click());
       return btns.length ? 'Retrying ' + btns.length + ' picture' + (btns.length === 1 ? '' : 's') + '.' : 'No failed pictures on the page.'; } },
@@ -7083,6 +7112,99 @@
   };
   // WHY: Make a health report. HOW: rows is a list of results; row(ok, text) adds one. First checks online state,
   // pdfmaker.js, compression support, WebP conversion and storage access. IMPROVE: group rows by topic.
+  /* ROUND 59 - THE SITE-VIEW DOCTOR (Page 2). WHY: the owner's arenascan chapter showed spinners / nothing on Page 2 while reading mode (Page 3) worked, and the old
+          troubleshooter could not see it (it only counted pictures that "loaded" - a spinner picture loads fine). HOW: siteViewScan() LOOKS at the page on screen and compares it with
+          what the reader's own finder knows (fromScripts / scanPictures / chapterPictures). It lists named problems (codes P2-...). siteViewRepair() fixes what can be fixed:
+          fills placeholder slots, adds missing pictures, retries failed ones through the proxies, switches off a loading bar/banner that never ends, asks for the chapter list again.
+          siteViewFull() is the long report that is used when something could not be fixed. IMPROVE: add a code for every new site problem that is reported. */
+  async function siteViewScan(deep) {
+    const r = { on: false, problems: [], counts: {}, finder: {}, notes: [], pics: [] };
+    try {
+      if (frame.hidden || !cur || cur.isSearch) return r;
+      const d = frame.contentDocument; if (!d) { r.problems.push({ code: 'P2-NODOC', text: 'The site view cannot be read (the page frame has no document).', fix: false }); r.on = true; return r; }
+      r.on = true;
+      const base = cur.base || cur.url, im = Array.from(d.images || []);
+      const kind = i => { const s = (i.getAttribute('src') || '').trim(); if (!s) return 'noaddr'; if (PLACEHOLDER_SRC.test(s)) return 'placeholder'; if (/^data:/i.test(s)) return 'datadrawing'; if (i.complete && !i.naturalWidth) return 'failed'; if (!i.complete) return 'pending'; return i.naturalWidth > 20 ? 'ok' : 'tiny'; };
+      const c = r.counts; c.total = im.length; im.forEach(i => { const k = kind(i); c[k] = (c[k] || 0) + 1; });
+      // what the reading pipeline knows about the SAME page (page scripts are only read as text)
+      let js = [], sc = { list: [], how: '-' }, best = [];
+      try { js = fromScripts(cur.doc, base); } catch { /* none */ }
+      try { sc = scanPictures(cur.doc, base); } catch { /* none */ }
+      best = js.length >= sc.list.length ? js : sc.list;
+      if (deep && cur.doc) { try { const f = await Promise.race([chapterPictures(cur.doc, base, cur.url), new Promise(x => setTimeout(() => x(null), 8000))]); if (f && f.list && f.list.length > best.length) best = f.list; r.finder.how = f && f.how; } catch (e) { r.notes.push('chapterPictures failed: ' + (e && e.message)); } }
+      r.finder.scripts = js.length; r.finder.reader = sc.list.length; r.finder.readerHow = sc.how; r.finder.best = best.length; r.pics = best;
+      const shown = (c.ok || 0) + (c.pending || 0);
+      if ((c.placeholder || 0) + (c.noaddr || 0) > 0 && best.length >= 1) r.problems.push({ code: 'P2-PLACEHOLDER', text: ((c.placeholder || 0) + (c.noaddr || 0)) + ' picture slot(s) only show a placeholder/spinner or are empty, but the reader finder knows ' + best.length + ' real picture(s).', fix: true });
+      else if ((c.placeholder || 0) > 0) r.problems.push({ code: 'P2-PLACEHOLDER-NOSRC', text: (c.placeholder) + ' placeholder slot(s) and the finder found no real pictures.', fix: false });
+      if (best.length >= 3 && best.length >= shown + 3 && !((c.placeholder || 0) + (c.noaddr || 0) > 0 && shown + (c.placeholder || 0) + (c.noaddr || 0) >= best.length)) r.problems.push({ code: 'P2-MISSING', text: 'The page shows ' + shown + ' real picture(s) but the reader finder knows ' + best.length + '. Some pages of the chapter are missing here.', fix: true });
+      if ((c.failed || 0) > 0) r.problems.push({ code: 'P2-FAILED', text: (c.failed) + ' picture(s) failed to load (blocked or slow host).', fix: true });
+      // loading signs that never end
+      const barOn = $('#loadbar').classList.contains('on'), busyOn = !$('#busy').hidden;
+      const idle = cur.enhancingDone || !cur.enhancing;
+      c.loadbar = barOn; c.busy = busyOn; c.idle = !!idle;
+      if ((barOn || busyOn) && idle && !jobs.some(j => j.status === 'running') && reader.hidden) r.problems.push({ code: 'P2-STUCK-LOADING', text: 'A loading bar / "working" note is on although the page and its background work are finished.', fix: true });
+      // chapter page without a list
+      let isCh = false; try { isCh = looksLikeChapter(cur.doc, base, cur.url); } catch { /* unknown */ }
+      c.isChapter = isCh; c.listLen = cur.chapters ? cur.chapters.length : 0;
+      c.needList = !!(isCh && !c.listLen && idle);      // a chapter page normally has no list until it is asked for (the picker / reading mode load it on demand), so this is only a note here
+      // links that go nowhere
+      const dead = Array.from(d.querySelectorAll('a')).filter(a => { try { return isDeadAnchor(a); } catch { return false; } }).length; c.deadLinks = dead;
+      // things on the page that need scripts (they can never work in the frame)
+      c.scriptsRemoved = !d.querySelector('script'); c.csp = Array.from(cspSeen).join(', ') || 'none';
+    } catch (e) { r.problems.push({ code: 'P2-SCAN-ERROR', text: 'The site-view scan itself failed: ' + (e && e.message), fix: false }); }
+    SVD.last = r; return r;
+  }
+  const SVD = { last: null, fixed: [], failed: [] };
+  async function siteViewRepair() {
+    const out = [], r0 = await siteViewScan(true);
+    if (!r0.on) return { lines: ['Site view: nothing to repair (no site page is open).'], left: [], scan: r0 };
+    if (!r0.problems.length && !r0.counts.needList) return { lines: ['Site view: everything looks right (' + (r0.counts.ok || 0) + ' pictures loaded, finder knows ' + r0.finder.best + ').'], left: [], scan: r0 };
+    const d = frame.contentDocument, base = cur.base || cur.url, codes = r0.problems.map(p => p.code);
+    if (codes.some(x => x === 'P2-PLACEHOLDER' || x === 'P2-MISSING')) {
+      const res = placePictures(d, base, r0.pics);
+      out.push('Site view: filled ' + res.filled + ' empty slot(s) and added ' + res.added + ' missing picture(s) from the reader finder.');
+    }
+    if (codes.includes('P2-FAILED')) { try { sweepFrameImgs(d); out.push('Site view: retried the failed pictures through the proxies.'); } catch { /* ignore */ } }
+    if (codes.includes('P2-STUCK-LOADING')) { setLoading(false); setBusy(''); out.push('Site view: switched off a loading bar that never ended.'); }
+    let listFail = false;
+    if (r0.counts.needList) {
+      try {
+        const lr = await Promise.race([loadSeriesList(cur.doc, base, cur.url), new Promise(x => setTimeout(() => x(null), 20000))]);
+        if (lr && lr.chapters && lr.chapters.length >= 2) { cur.chapters = lr.chapters; try { applyLive(frame.contentDocument); } catch { /* the list is kept anyway */ } out.push('Site view: loaded the chapter list from the series page (' + lr.chapters.length + ' chapters).'); }
+        else { listFail = true; out.push('Site view: the chapter list could not be found on the series page.'); }
+      } catch (e) { listFail = true; out.push('Site view: the chapter list could not be fetched (' + (e && e.message) + ').'); }
+    }
+    if (codes.includes('P2-STUCK-LOADING')) { setLoading(false); setBusy(''); }       // the list loading above may switch the note on again: switch it off once more
+    await new Promise(x => setTimeout(x, 2500));            // give the new pictures a moment to load, then look again
+    const r1 = await siteViewScan(false), left = r1.problems.filter(p => !(p.code === 'P2-FAILED' && (r1.counts.failed || 0) === 0));
+    if (listFail) left.push({ code: 'P2-NOLIST', text: 'Chapter page without a findable chapter list.', fix: false });
+    out.push(left.length ? 'Site view: ' + left.length + ' problem(s) remain: ' + left.map(p => p.code).join(', ') : 'Site view: all problems repaired.');
+    SVD.fixed = r0.problems.filter(p => !left.some(l => l.code === p.code)).map(p => p.code); SVD.failed = left.map(p => p.code);
+    return { lines: out, left, scan: r1 };
+  }
+  // WHY: the "everything we know" report for a problem that could not be repaired. HOW: scan data, every picture (kind, address attribute, address, size), the page's own head (CSP, base), a script count,
+  //   proxy answers, the problem log. It is plain text so it can be pasted into any AI. IMPROVE: add a screenshot hint.
+  async function siteViewFull() {
+    const r = SVD.last || await siteViewScan(true), L = [];
+    L.push('=== SITE VIEW (Page 2) DETAIL ===', 'Page: ' + (cur ? cur.url : '-'), 'Scan: ' + JSON.stringify(r.counts), 'Reader finder: ' + JSON.stringify(r.finder));
+    L.push('Problems found: ' + (r.problems.map(p => p.code + ' - ' + p.text).join(' | ') || 'none'), 'Repaired: ' + (SVD.fixed.join(', ') || 'none') + ' · Not repaired: ' + (SVD.failed.join(', ') || 'none'));
+    try {
+      const d = frame.contentDocument;
+      if (d) {
+        L.push('Frame title: ' + d.title, 'Frame text length: ' + (d.body ? d.body.innerText.length : 0), 'Frame head meta: ' + Array.from(d.querySelectorAll('meta')).map(m => (m.httpEquiv || m.name || m.getAttribute('property') || '') + '=' + (m.content || '').slice(0, 60)).join(' ; '));
+        L.push('First 40 pictures (state | attribute used | address as written | natural size):');
+        Array.from(d.images).slice(0, 40).forEach((i, k) => { const inf = imgAddressInfo(i, cur.base || cur.url); L.push('  ' + (k + 1) + '. ' + (i.complete ? (i.naturalWidth ? 'loaded' : 'FAILED') : 'pending') + ' | ' + (inf.attr || 'none') + ' | ' + (i.getAttribute('src') || '').slice(0, 110) + ' | ' + i.naturalWidth + 'x' + i.naturalHeight + (i.dataset.mfAdded ? ' (added by MangaFlow)' : '')); });
+        const cls = {}; d.querySelectorAll('[class]').forEach(e => { String(e.className).split(/\s+/).forEach(n => { if (/load|spin|lazy|reader|chapter|page/i.test(n)) cls[n] = (cls[n] || 0) + 1; }); });
+        L.push('Useful class names on the page (name x count): ' + Object.entries(cls).slice(0, 30).map(e => e[0] + 'x' + e[1]).join(', '));
+      }
+      if (cur && cur.doc) {
+        const sc = Array.from(cur.doc.querySelectorAll('script')); L.push('Original page scripts: ' + sc.length + ' (' + sc.filter(s => !s.src).length + ' inline, ' + sc.filter(s => s.src).length + ' external). Picture words inside inline scripts: ' + sc.filter(s => /images?["']?\s*:|\.webp|\.jpe?g/i.test(s.textContent || '')).length);
+      }
+    } catch (e) { L.push('(detail failed: ' + (e && e.message) + ')'); }
+    L.push('Chapter list on site view: ' + pageListText(), 'Chapter audit: ' + chapterAuditText(), 'CSP blocks seen: ' + (Array.from(cspSeen).join(', ') || 'none'));
+    L.push('Address hash: ' + location.hash.slice(0, 160), 'Screen: ' + innerWidth + 'x' + innerHeight + ' dpr ' + devicePixelRatio);
+    return L.join('\n');
+  }
   async function selfCheck() {
     const rows = [], row = (ok, text) => rows.push({ ok, text });
     row(navigator.onLine, navigator.onLine ? 'The device says it is online.' : 'The device says it is OFFLINE. Check Wi-Fi / mobile data.');
@@ -7113,6 +7235,8 @@
     jobs.forEach(j => row(j.status === 'error' || j.stalled ? false : null, 'Download #' + j.id + ': ' + j.status + (j.stalled ? ' (STALLED)' : '') + ' · ' + (j.text || '')));
     row(null, 'Picture routes: ' + routeStatText());
     row(null, 'Site view pictures (round 51): ' + pageViewPicText());
+    // ROUND 59: the site-view doctor - named problems with their codes (a green tick means "nothing found")
+    try { const sv = await siteViewScan(true); if (sv.on) { if (!sv.problems.length) row(true, 'Site view looks right: ' + (sv.counts.ok || 0) + ' pictures shown, reader finder knows ' + sv.finder.best + '.'); sv.problems.forEach(p => row(false, '[' + p.code + '] ' + p.text + (p.fix ? ' — "Fix automatically" can repair this.' : ' — needs a report.'))); } } catch (e) { row(false, 'Site view check failed: ' + (e && e.message)); }
     row(null, 'Chapter boxes (round 52): ' + chapterHealthText());
     row(null, 'Chapter audit (round 55): ' + chapterAuditText());
     row(null, 'Site view chapter list (round 57): ' + pageListText());
@@ -7141,10 +7265,19 @@
       if (bad.length) { say('Reloading ' + bad.length + ' chapter box' + (bad.length === 1 ? '' : 'es') + ' that showed a message.'); reloadSections(bad); }
       if (performance && performance.memory && performance.memory.usedJSHeapSize > performance.memory.jsHeapSizeLimit * 0.6) say(await FIX.freeMemory.run());
     }
+    // ROUND 59: the site-view doctor. WHY: find and repair the problems that only show on Page 2 (spinners, missing pictures, never-ending loading, empty chapter list).
+    let svLeft = [];
+    try { const sv = await siteViewRepair(); sv.lines.forEach(say); svLeft = sv.left; } catch (e) { say('Site view repair failed: ' + (e && e.message)); }
     // WHY: Finish the auto repair. HOW: cancels stuck downloads and mentions it only if something was found, then prints the
     // final hint. IMPROVE: offer to copy the report automatically.
     const cs = await FIX.cancelStuck.run(); if (!/No stuck/.test(cs)) say(cs);
-    say('Done. If it still fails, press "Copy full report" and use a question from "Symptoms & answers".');
+    if (svLeft.length || errLog.length && Date.now() - errLog[errLog.length - 1].at < 120000) {
+      // ROUND 59: something could not be fixed -> build the COMPLETE report now (everything gathered), show it in the box and try to copy it.
+      log.push({ ok: false, text: 'Not everything could be repaired' + (svLeft.length ? ' (' + svLeft.map(p => p.code).join(', ') + ')' : '') + '. A complete error report was made for you (below) - paste it to Claude or any AI, or use "Send report to server".' });
+      paintRows(log, $('#fixList'));
+      const txt = diagnostic(await siteViewFull()), box = $('#fixReport'); if (box) { box.value = txt; box.hidden = false; }
+      try { await copyText(txt); } catch { /* the person can copy it from the box */ }
+    } else { const box = $('#fixReport'); if (box) { box.value = ''; box.hidden = true; } say('Done. Nothing is left that the checks can see. If it still fails, press "Copy full report".'); }
   }
   // WHY: Build the big report that is pasted into Claude questions. HOW: joins lines with time, page, browser, current
   // manga, settings, add-ons, routes, memory, downloads, last 4 problems and the latest download report. IMPROVE: hide
@@ -7152,7 +7285,7 @@
   function diagnostic(extra) {
     // ROUND 21: the report now says which build it is, how Google search went last time and how the profile sync went, so a bug report shows the cause at once.
     const PF = window.MangaFlowProfiles, si = PF && PF.syncInfo ? PF.syncInfo() : null;
-    return ['MangaFlow diagnostic (build round 31)', 'Time: ' + new Date().toString(), 'App page: ' + location.href, 'Browser: ' + navigator.userAgent,
+    return ['MangaFlow diagnostic (build round 59)', 'Time: ' + new Date().toString(), 'App page: ' + location.href, 'Browser: ' + navigator.userAgent,
       'Manga page open: ' + (cur ? cur.url : '-'),
       // WHY: the reading state in the copy-for-Claude text. HOW: title, chapter number and total.
       'Reading: ' + (R.chapters && R.chapters.length ? R.title + ' | chapter ' + (R.cur + 1) + ' of ' + R.chapters.length : 'not reading'),
@@ -7218,12 +7351,12 @@
   // it); Copy copies the report; Open draws the guide and shows the dialog. IMPROVE: show a spinner.
   $('#fixAuto').onclick = async e => { e.target.disabled = true; try { await autoFix(); } finally { e.target.disabled = false; } };
   $('#fixCheck').onclick = async e => { e.target.disabled = true; paintRows([{ ok: null, text: 'Checking…' }], $('#fixList')); try { paintRows(await selfCheck(), $('#fixList')); } finally { e.target.disabled = false; } };
-  $('#fixCopy').onclick = () => copyText(diagnostic());
+  $('#fixCopy').onclick = async () => copyText(diagnostic(await siteViewFull()));   // round 59: includes the site-view detail
   // ROUND 19: send the full diagnostic to the accounts server (profiles.js does the sending; it works signed in or not, with a limit of 3 per 10 minutes when not).
   // WHY: the owner wants every report on the server so the pages can be fixed from it. HOW: MangaFlowProfiles.sendReport(title, report, page).
   $('#fixSend').onclick = async () => {
     const P = window.MangaFlowProfiles; if (!P || !P.sendReport) { toast('The profile add-on (profiles.js) is not loaded'); return; }
-    try { await P.sendReport('Troubleshoot report', diagnostic(), cur && cur.url || location.href); toast('Report sent to the server. Thank you!'); }
+    try { await P.sendReport('Troubleshoot report', diagnostic(await siteViewFull()), cur && cur.url || location.href); toast('Report sent to the server. Thank you!'); }
     catch (e) { toast('Not sent: ' + clipText(e.message, 90)); }
   };
   // ROUND 19 (this code sits inside section 17; the Settings window has no section of its own): the Profile tab of Settings. WHY: reach the profile / sync from reading mode and from any page. HOW: buttons call the profiles.js doors.

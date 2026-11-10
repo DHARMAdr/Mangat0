@@ -1,7 +1,7 @@
 # MANGAFLOW — Project Reference, Code Map & Build History
 *GitHub repo: https://github.com/DHARMAdr/Mangat0 · Site: https://dharmadr.github.io/Mangat0/*
 *Cloudflare Workers: `worker.js` (page/image proxy) and `accounts-worker.js` (cloud profiles, D1 database)*
-*Last updated: Round 58 — 2026-11-10 · Only HTML, CSS and JavaScript are used (no build step, no frameworks).*
+*Last updated: Round 59 — 2026-11-11 · Only HTML, CSS and JavaScript are used (no build step, no frameworks).*
 
 > This ONE file replaces every older copy. It has (1) the page naming we use, (2) what every file is for, (3) for every part of every file **why it exists / how it works / how it can be improved**, (4) the complete history up to the latest round, (5) how to continue with Claude.
 
@@ -215,6 +215,23 @@ NOT reproduced: "reading shows chapter 1 then 20" and empty chapter boxes (mock 
 - A real phone's native date picker cannot be driven by Playwright; the fix was verified by logic and emulation. If it still misbehaves on one specific phone, tell Claude the model + browser.
 
 ---
+
+
+## 4o. Round 59 — Page 2 spinner pictures + the Site-View Doctor in Troubleshoot (app.js, troubleshoot-data.js, index.html, `?v=59`)
+
+**Report (arenascan, 2026-11-10/11):** Page 2 (site view) of a chapter "keeps loading" and shows no chapters, while reading mode (Page 3) works perfectly. The report said "9 pictures, 9 loaded, 0 retried" — i.e. the pictures "loaded" but were not the chapter.
+
+**Root cause (found, reproduced with a mock, fixed):** the site (MangaStream/"mangareader" theme) puts a spinner drawing `readerarea.svg` in every picture slot and lets its own script (`ts_reader.run({... images:[...]})`) swap in the real pages. MangaFlow never runs a site's scripts. The "empty slot" rule only looked for slots with NO address, and a slot with `readerarea.svg` HAS an address, so nothing was filled and the spinner stayed for ever. Old code on the mock: 3 spinner pictures. New code: all 20 pages.
+
+**Fixes**
+1. `PLACEHOLDER_SRC` (new) recognises placeholder names (readerarea, blank, spacer, transparent, lazy, placeholder, loader, loading, spinner, 1x1...). They now count as EMPTY in `navigate()` (empty-slot rule), `fixLazy()` and the new `placePictures()`.
+2. `placePictures(d, base, pics)` (new, taken out of `renderFrame`): fills empty/placeholder slots in page order, then ADDS the pictures the reader finder knows but the page has no slot for (after the last real picture, same box). Also runs when the page shows 3 or more FEWER pictures than its own scripts list.
+3. **Site-View Doctor** (new, before `selfCheck`): `siteViewScan()` counts picture kinds (ok / placeholder / noaddr / failed / pending), asks the reader finder (`fromScripts`, `scanPictures`, `chapterPictures`) what the page SHOULD show and lists named problems: `P2-PLACEHOLDER`, `P2-MISSING`, `P2-FAILED`, `P2-STUCK-LOADING`, `P2-NOLIST`, `P2-NODOC`. `siteViewRepair()` repairs them (fill/add pictures, retry failed through proxies, switch off a never-ending loading bar/banner, load the chapter list from the series page). `siteViewFull()` builds the long detail report.
+4. **Settings > Troubleshoot:** "Run checks" now shows those problems; "Fix automatically" runs the doctor; if something cannot be repaired it builds the COMPLETE report (diagnostic + site-view detail: every picture with state/attribute/address/size, class names, script counts, CSP blocks, hash, screen), shows it in a new box (`#fixReport`) and copies it. "Copy full report" and "Send report to server" include the site-view detail. New repair button "Repair this site page" and a new symptom in the guide. Report headers now say "build round 59".
+
+**Tests (mock arenascan, Playwright):** old code = 3 spinners (reproduced); new = 20 pictures; healthy page shows "Site view looks right", no false alarm; broken page (spinners, 3 slots, loading bar stuck) is repaired by Fix automatically; page with spinners and no data anywhere produces the complete report.
+
+**IMPROVE:** add more placeholder names when a new site reports a spinner; add a screenshot hint to the report.
 
 ## How to Deploy / Set Up
 
