@@ -1,7 +1,7 @@
 # MANGAFLOW — Project Reference, Code Map & Build History
 *GitHub repo: https://github.com/DHARMAdr/Mangat0 · Site: https://dharmadr.github.io/Mangat0/*
 *Cloudflare Workers: `worker.js` (page/image proxy) and `accounts-worker.js` (cloud profiles, D1 database)*
-*Last updated: Round 56 — 2026-11-10 · Only HTML, CSS and JavaScript are used (no build step, no frameworks).*
+*Last updated: Round 57 — 2026-11-10 · Only HTML, CSS and JavaScript are used (no build step, no frameworks).*
 
 > This ONE file replaces every older copy. It has (1) the page naming we use, (2) what every file is for, (3) for every part of every file **why it exists / how it works / how it can be improved**, (4) the complete history up to the latest round, (5) how to continue with Claude.
 
@@ -195,6 +195,13 @@ Limits: only sites whose chapter addresses contain "chapter/ch/episode + number"
 2. **Button bridge** (app.js, block "ROUND 56 - BUTTON BRIDGE" just above `onFrameClick`). PROBLEM: nyxscans.com (React/Next.js) draws its Next / Previous / Chapters bar with script-driven `<button>`s that have no address; MangaFlow never runs a site's scripts, so they did nothing on Page 2. SOLUTION in 3 parts: (a) `classifyControl()` reads the meaning of the clicked control (aria-label, title, alt, small text, svg title, symbols > <, id/class names; words in English, Spanish, French, Portuguese, Indonesian, Turkish, German, Italian, Arabic, Chinese, Japanese, Korean) -> NEXT / PREVIOUS / LIST; (b) `navTargets()` finds the real addresses (the page's own links via `findNavLinks`, else the detected chapter list, else the same address with the number +1 / -1) and `openNavTarget()` opens them in Page 2; LIST opens our own `<dialog id="mfChapPick">` picker (`openChapterPicker`, loads the series page with `loadSeriesList` when needed, has a find box); controls carrying `data-href/data-url/data-link` are simply opened; (c) `markNavControls()` un-hides recognised controls the site keeps transparent until its script runs, and when a chapter page has NO recognisable buttons, `#p2NavBar` (3 tiny round buttons: previous, list, next) is shown by `updateP2Bar()`. Only active on chapter pages (`onChapterPage()`), never on search lists or ordinary pages, and real `<a>` links are untouched.
 3. Test `work/audit/bridge.js` (mock Next-style page): Previous -> chapter 4, Next -> 5 -> 6, data-href button -> 11, list button opens picker with 12 items and picking chapter 2 opens chapter 2; page without any bar -> tiny bar Next/Previous/List all work. Full regression (176 checks + older scripts) still passes.
 4. New file `MANGAFLOW_FULL_SITE.md`: the whole site (every source file, full CSS) plus guide, history and rebuild steps.
+
+## 4m. Round 57 — arenascan: "Page 2 keeps loading", "reading shows chapter 1 then 20" (app.js, `?v=57`)
+Report: arenascan.com `the-real-tycoon-all-by-myself-chapter-19`: Page 2 showed no chapters and "kept loading"; reading mode showed chapter 1 and then jumped to 20. The report itself had no error. NOT reproduced with a mock (a flat-address site with list "1, 20..30" opened chapters 1..30 correctly, with or without script-written pictures), so these are DEFENSIVE fixes plus better diagnostics:
+1. `tryAutoRead` waited for the background chapter-list reader with no limit; the banner "Looking for chapters…" could stay for minutes on long split lists. Now it waits at most 20 s (race) and `setBusy` hides any banner after 120 s.
+2. Chapter-audit verification (round 55) removed a guessed chapter when its page answered but showed no pictures in the HTML. Now only a real "not found" removes a chapter: HTTP 404/410, or a page titled 404/not found that does not mention the chapter number. A page that answers is kept and tried when reached.
+3. Diagnostic reports now have "Site view chapter list (round 57)": chapters known, number range, whether the background reader has finished, and the banner text.
+NEXT STEP if it happens again: send the report copied (a) from the error pop-up "Chapter check" if shown, and (b) while reading, so the lines "Chapter audit (round 55)" and "Site view chapter list (round 57)" show the real numbers.
 
 ### Open items (not changed)
 - Bookmark deleted in profile can reappear from the cloud until the next state push (push right after delete).

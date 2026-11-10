@@ -67,7 +67,7 @@ The complete stylesheet is Part C, file `style.css` (about 1,400 lines, every ru
 # MANGAFLOW — Project Reference, Code Map & Build History
 *GitHub repo: https://github.com/DHARMAdr/Mangat0 · Site: https://dharmadr.github.io/Mangat0/*
 *Cloudflare Workers: `worker.js` (page/image proxy) and `accounts-worker.js` (cloud profiles, D1 database)*
-*Last updated: Round 56 — 2026-11-10 · Only HTML, CSS and JavaScript are used (no build step, no frameworks).*
+*Last updated: Round 57 — 2026-11-10 · Only HTML, CSS and JavaScript are used (no build step, no frameworks).*
 
 > This ONE file replaces every older copy. It has (1) the page naming we use, (2) what every file is for, (3) for every part of every file **why it exists / how it works / how it can be improved**, (4) the complete history up to the latest round, (5) how to continue with Claude.
 
@@ -261,6 +261,13 @@ Limits: only sites whose chapter addresses contain "chapter/ch/episode + number"
 2. **Button bridge** (app.js, block "ROUND 56 - BUTTON BRIDGE" just above `onFrameClick`). PROBLEM: nyxscans.com (React/Next.js) draws its Next / Previous / Chapters bar with script-driven `<button>`s that have no address; MangaFlow never runs a site's scripts, so they did nothing on Page 2. SOLUTION in 3 parts: (a) `classifyControl()` reads the meaning of the clicked control (aria-label, title, alt, small text, svg title, symbols > <, id/class names; words in English, Spanish, French, Portuguese, Indonesian, Turkish, German, Italian, Arabic, Chinese, Japanese, Korean) -> NEXT / PREVIOUS / LIST; (b) `navTargets()` finds the real addresses (the page's own links via `findNavLinks`, else the detected chapter list, else the same address with the number +1 / -1) and `openNavTarget()` opens them in Page 2; LIST opens our own `<dialog id="mfChapPick">` picker (`openChapterPicker`, loads the series page with `loadSeriesList` when needed, has a find box); controls carrying `data-href/data-url/data-link` are simply opened; (c) `markNavControls()` un-hides recognised controls the site keeps transparent until its script runs, and when a chapter page has NO recognisable buttons, `#p2NavBar` (3 tiny round buttons: previous, list, next) is shown by `updateP2Bar()`. Only active on chapter pages (`onChapterPage()`), never on search lists or ordinary pages, and real `<a>` links are untouched.
 3. Test `work/audit/bridge.js` (mock Next-style page): Previous -> chapter 4, Next -> 5 -> 6, data-href button -> 11, list button opens picker with 12 items and picking chapter 2 opens chapter 2; page without any bar -> tiny bar Next/Previous/List all work. Full regression (176 checks + older scripts) still passes.
 4. New file `MANGAFLOW_FULL_SITE.md`: the whole site (every source file, full CSS) plus guide, history and rebuild steps.
+
+## 4m. Round 57 — arenascan: "Page 2 keeps loading", "reading shows chapter 1 then 20" (app.js, `?v=57`)
+Report: arenascan.com `the-real-tycoon-all-by-myself-chapter-19`: Page 2 showed no chapters and "kept loading"; reading mode showed chapter 1 and then jumped to 20. The report itself had no error. NOT reproduced with a mock (a flat-address site with list "1, 20..30" opened chapters 1..30 correctly, with or without script-written pictures), so these are DEFENSIVE fixes plus better diagnostics:
+1. `tryAutoRead` waited for the background chapter-list reader with no limit; the banner "Looking for chapters…" could stay for minutes on long split lists. Now it waits at most 20 s (race) and `setBusy` hides any banner after 120 s.
+2. Chapter-audit verification (round 55) removed a guessed chapter when its page answered but showed no pictures in the HTML. Now only a real "not found" removes a chapter: HTTP 404/410, or a page titled 404/not found that does not mention the chapter number. A page that answers is kept and tried when reached.
+3. Diagnostic reports now have "Site view chapter list (round 57)": chapters known, number range, whether the background reader has finished, and the banner text.
+NEXT STEP if it happens again: send the report copied (a) from the error pop-up "Chapter check" if shown, and (b) while reading, so the lines "Chapter audit (round 55)" and "Site view chapter list (round 57)" show the real numbers.
 
 ### Open items (not changed)
 - Bookmark deleted in profile can reappear from the cloud until the next state push (push right after delete).
@@ -712,17 +719,17 @@ Each file has: a short introduction (why it exists), then the code between BEGIN
        carriers/browsers, can keep serving an OLD cached copy of style.css / app.js / profiles.js / etc. for a
        while after a new version is deployed, because every round reused the exact same file name and address,
        which is the one thing a cache uses to decide "have I already got this?". WHY the fix: every local
-       stylesheet/script tag below now ends in "?v=56" — changing that number is a tiny edit to THIS file, but it
+       stylesheet/script tag below now ends in "?v=57" — changing that number is a tiny edit to THIS file, but it
        makes the browser treat it as a brand-new address it has never cached before, forcing a fresh download
        every time, with no stale leftovers possible, regardless of how long a phone or carrier would otherwise
-       hold onto the old copy. HOW TO KEEP THIS WORKING: bump every "?v=56" below to the new round's number
+       hold onto the old copy. HOW TO KEEP THIS WORKING: bump every "?v=57" below to the new round's number
        whenever ANY of these specific files changes in a future round (a quick find-and-replace) — Claude will
        keep doing this automatically going forward. IMPROVE: a build step that computes this automatically from
        each file's own content hash, so it can never be forgotten by hand. -->
-  <link rel="stylesheet" href="style.css?v=56">
+  <link rel="stylesheet" href="style.css?v=57">
   <!-- ROUND 29: boot.js runs BEFORE the first paint. WHY: so a refresh / reopen shows the cover "Reopening where you were..." (below) and the saved dark theme at once,
        instead of flashing the start page while the big app.js loads. HOW: it only reads the address and the saved settings. IMPROVE: none needed. It is safe to remove (the flash returns). -->
-  <script src="boot.js?v=56"></script>
+  <script src="boot.js?v=57"></script>
 </head>
 <body data-side="right">
 
@@ -1293,24 +1300,24 @@ Each file has: a short introduction (why it exists), then the code between BEGIN
   </dialog>
 
   <!-- pdfmaker.js must come BEFORE app.js (app.js uses MangaPDFLib). -->
-  <script src="pdfmaker.js?v=56"></script>
+  <script src="pdfmaker.js?v=57"></script>
   <!-- ROUND 11 (OPTIONAL): the texts of the troubleshoot guide. Without this file the guide is empty; the checks still work. Load it BEFORE app.js. -->
-  <script src="troubleshoot-data.js?v=56"></script>
-  <script src="app.js?v=56"></script>
+  <script src="troubleshoot-data.js?v=57"></script>
+  <script src="app.js?v=57"></script>
   <!-- ROUND 10 (OPTIONAL): the chapter slider on the right edge. Delete this one line (or the file) and the slider is simply gone;
        nothing else needs it. It talks to app.js only through the browser event "mf-chapter-step". -->
-  <script src="chapter-slider.js?v=56"></script>
+  <script src="chapter-slider.js?v=57"></script>
   <!-- ROUND 11 (OPTIONAL): the reload wheel on the left edge (turn right = reload this chapter, turn left = reload all). Same rule:
        delete this line (or the file) and it is gone. It talks to app.js only through the event "mf-reload". -->
-  <script src="reload-wheel.js?v=56"></script>
+  <script src="reload-wheel.js?v=57"></script>
   <!-- ROUND 18 (OPTIONAL): the Top / End slider on the left edge, above the reload wheel. Delete this line (or the file) and the Top / End keys stay. -->
-  <script src="edge-slider.js?v=56"></script>
+  <script src="edge-slider.js?v=57"></script>
   <!-- ROUND 32 (OPTIONAL): the Translate button (文A, left edge) and its engine. It needs the folder ocr/ (text reader + language files). Delete this line and the
        button, the Settings tab and every translation feature are simply gone; nothing else needs it. It talks to app.js only through the events mf-settings,
        mf-settings-set and mf-translate-problem. -->
-  <script src="translate.js?v=56"></script>
+  <script src="translate.js?v=57"></script>
   <!-- ROUND 13: optional profile icon + sign-in + admin view (delete this line and profiles.js to remove the feature) -->
-  <script src="profiles.js?v=56"></script>
+  <script src="profiles.js?v=57"></script>
 </body>
 </html>
 ~~~~~~
@@ -3582,7 +3589,7 @@ window.MF_FIX = {
 <!-- END FILE -->
 
 
-### File: `app.js`  (7838 lines)
+### File: `app.js`  (7855 lines)
 
 **Why this file exists / what it does:** THE MAIN PROGRAM (about 7,800 lines): proxies and fetching, page analysis, chapter detection, the mini-browser (Page 2), reading mode (Page 3), downloads, settings, keyboard shortcuts, error reports, the chapter audit and the button bridge.
 
@@ -4533,6 +4540,7 @@ window.MF_FIX = {
     if (!msg) { b.hidden = true; return; }
     // WHY: a small banner for the person. HOW: unhide it and set its text.
     b.hidden = false; b.textContent = msg;
+    clearTimeout(setBusy.t); setBusy.t = setTimeout(() => { b.hidden = true; }, 120000);   // ROUND 57: a working note never stays longer than 2 minutes
   }
   // WHY: the thin loading bar at the top of the page. HOW: classList.toggle adds the 'on' class when on is true, removes
   // it when false. IMPROVE: show real progress.
@@ -5919,7 +5927,7 @@ window.MF_FIX = {
       const page = cur;
       // WHY: fetch hidden chapter lists without freezing the screen. HOW: store the running promise in page.enhancing so
       // others can wait for it.
-      page.enhancing = isSearch ? Promise.resolve() : enhanceSeriesPage(page);        // runs in the background, adds the chapter list when ready (round 17: not for our own results list)
+      page.enhancing = isSearch ? Promise.resolve() : enhanceSeriesPage(page).finally(() => { page.enhancingDone = true; });        // runs in the background, adds the chapter list when ready (round 17: not for our own results list)
       // WHY: mark success. HOW: ok = true.
       ok = true;
       // WHY: if the person typed this link, maybe jump into reading mode. HOW: tryAutoRead runs in the background (no await).
@@ -5957,7 +5965,9 @@ window.MF_FIX = {
       // WHY: tell the person we are working. HOW: setBusy shows a message.
       setBusy('Looking for chapters…');
       // WHY: wait for the hidden chapter lists first. HOW: await the stored promise.
-      await page.enhancing;                                               // wait for hidden chapter lists
+      // ROUND 57: wait at most 20 seconds. WHY: on sites with a long split chapter list (arenascan) the banner "Looking for chapters…" stayed for minutes and looked like loading that never ends.
+      //   HOW: race the background reader against a 20 s timer; the reader itself keeps working and reading mode waits for it only when it needs the list. IMPROVE: show the page number it is on.
+      await Promise.race([page.enhancing, new Promise(r => setTimeout(r, 20000))]);
       // WHY: the person may have left. HOW: if cur is no longer this page, stop.
       if (cur !== page) return;                                           // the person went somewhere else
       // WHY: is this a chapter page? HOW: ok is true if 3 or more pictures are found, or the address has a chapter number and
@@ -7772,9 +7782,14 @@ window.MF_FIX = {
         const c = gaps[k++]; if (R.gen !== gen) return;
         try {
           const { doc, base } = await fetchDoc(c.url);
+          // ROUND 57: a page that ANSWERS (HTTP 200) is kept even when no picture can be seen in its HTML. WHY: sites such as arenascan write the pictures with a script, so the old rule
+          //   ("no picture = chapter missing") wrongly threw real chapters out and the reader jumped from chapter 1 to chapter 20. HOW: only an honest "not found" removes a chapter:
+          //   HTTP 404/410 (below) or a page whose title says 404 / not found and that does not mention this chapter number.
           const sc = scanPictures(doc, base);
-          if (sc.list.length >= 1 || sc.holders >= 1 || looksLikeChapter(doc, base, c.url)) { c.verified = true; A.verified++; }
-          else { c.dead = true; A.dead.push(c.num + ' (page exists but has no pictures)'); }
+          const ttl = ((doc.title || '') + ' ' + ((doc.querySelector('h1') || {}).textContent || '')).toLowerCase();
+          const says404 = /\b404\b|not found|page (does ?n.t|does not) exist|no longer available/.test(ttl) && !new RegExp('(^|[^0-9])' + c.num + '([^0-9]|$)').test(ttl);
+          if (says404 && sc.list.length < 1) { c.dead = true; A.dead.push(c.num + ' (the site shows its "not found" page)'); }
+          else { c.verified = true; A.verified++; }
         } catch (e) {
           const msg = String((e && e.message) || e);
           if (/HTTP 404|HTTP 410|NOT FOUND/i.test(msg)) { c.dead = true; A.dead.push(c.num + ' (not on the site: ' + (msg.match(/HTTP 4\d\d/) || ['not found'])[0] + ')'); }
@@ -7820,6 +7835,14 @@ window.MF_FIX = {
       : A.dead.length ? 'The site is missing ' + A.dead.length + ' chapter(s): ' + A.dead.slice(0, 8).map(x => x.split(' ')[0]).join(', ') + (A.dead.length > 8 ? ' …' : '')
       : 'Some chapters could not be checked: ' + A.unsure.slice(0, 8).map(x => x.split(' ')[0]).join(', ');
     showError(head, { title: '📚 Chapter check: ' + (A.notDetected.length ? 'not shown in reading mode' : A.dead.length ? 'missing on the site' : 'could not verify'), details: lines.join('\n'), hint: 'Open the original site and look at the chapter list. If the chapter is there, press Retry on its box or send this report.' });
+  }
+  // ROUND 57: what the site view (Page 2) knows about the chapter list - for the diagnostic report when "no chapter shows".
+  function pageListText() {
+    if (!cur) return 'no page open';
+    const L = cur.chapters || [];
+    let nums = ''; try { const n = L.map(c => chapterNumInUrl(c.url)).filter(x => x != null); if (n.length) nums = ', numbers ' + Math.min(...n) + ' to ' + Math.max(...n) + ' (' + new Set(n).size + ' different)'; } catch { /* ignore */ }
+    const busy = (document.getElementById('busy') || {}).hidden === false ? ', banner: "' + document.getElementById('busy').textContent + '"' : '';
+    return 'list ' + L.length + ' chapters' + nums + ', background reader ' + (cur.enhancingDone ? 'finished' : 'still working') + busy;
   }
   function chapterAuditText() {
     const A = R && R.audit; if (!A) return 'no audit yet';
@@ -10680,6 +10703,7 @@ window.MF_FIX = {
     row(null, 'Site view pictures (round 51): ' + pageViewPicText());
     row(null, 'Chapter boxes (round 52): ' + chapterHealthText());
     row(null, 'Chapter audit (round 55): ' + chapterAuditText());
+    row(null, 'Site view chapter list (round 57): ' + pageListText());
     row(null, 'Memory: ' + heapText() + ' · PDF picture quality: ' + settings.pdfMode);
     return rows;
   }
@@ -10730,7 +10754,7 @@ window.MF_FIX = {
       'Human check (round 29e): ' + (humanHosts.size ? [...humanHosts.keys()].join(', ') + ' waiting' : 'no site waiting'),
       'Search engine: ' + settings.searchEngine + ' (strict ' + !!settings.engineStrict + '), Google ID ' + (settings.googleCx || 'none') + ', last Google result: ' + (googleLast || 'no Google search yet') + ', blocked by page rules: ' + (Array.from(cspSeen).join(', ') || 'nothing'),
       'Profile: ' + (PF && PF.user() ? PF.user() + ' (' + PF.role() + ')' : 'not signed in') + ', sync: ' + (si && si.ok !== null ? (si.ok ? 'OK ' : 'FAILED ' + si.err + ' ') + new Date(si.t).toLocaleTimeString() : 'nothing sent yet'),
-      'Picture routes: ' + routeStatText(), 'Site view pictures (round 51): ' + pageViewPicText(), 'Chapter boxes (round 52): ' + chapterHealthText(), 'Chapter audit (round 55): ' + chapterAuditText(), 'Memory: ' + heapText(),
+      'Picture routes: ' + routeStatText(), 'Site view pictures (round 51): ' + pageViewPicText(), 'Chapter boxes (round 52): ' + chapterHealthText(), 'Chapter audit (round 55): ' + chapterAuditText(), 'Site view chapter list (round 57): ' + pageListText(), 'Memory: ' + heapText(),
       'Downloads: ' + (jobs.map(j => '#' + j.id + ' ' + j.status + ' ' + (j.pct || 0) + '% ' + (j.text || '')).join(' | ') || 'none'),
       extra || '',
       '--- last problems (newest last) ---', errLog.slice(-4).map(e => e.report).join('\n\n=====\n') || 'none',

@@ -943,6 +943,7 @@
     if (!msg) { b.hidden = true; return; }
     // WHY: a small banner for the person. HOW: unhide it and set its text.
     b.hidden = false; b.textContent = msg;
+    clearTimeout(setBusy.t); setBusy.t = setTimeout(() => { b.hidden = true; }, 120000);   // ROUND 57: a working note never stays longer than 2 minutes
   }
   // WHY: the thin loading bar at the top of the page. HOW: classList.toggle adds the 'on' class when on is true, removes
   // it when false. IMPROVE: show real progress.
@@ -2329,7 +2330,7 @@
       const page = cur;
       // WHY: fetch hidden chapter lists without freezing the screen. HOW: store the running promise in page.enhancing so
       // others can wait for it.
-      page.enhancing = isSearch ? Promise.resolve() : enhanceSeriesPage(page);        // runs in the background, adds the chapter list when ready (round 17: not for our own results list)
+      page.enhancing = isSearch ? Promise.resolve() : enhanceSeriesPage(page).finally(() => { page.enhancingDone = true; });        // runs in the background, adds the chapter list when ready (round 17: not for our own results list)
       // WHY: mark success. HOW: ok = true.
       ok = true;
       // WHY: if the person typed this link, maybe jump into reading mode. HOW: tryAutoRead runs in the background (no await).
@@ -2367,7 +2368,9 @@
       // WHY: tell the person we are working. HOW: setBusy shows a message.
       setBusy('Looking for chapters…');
       // WHY: wait for the hidden chapter lists first. HOW: await the stored promise.
-      await page.enhancing;                                               // wait for hidden chapter lists
+      // ROUND 57: wait at most 20 seconds. WHY: on sites with a long split chapter list (arenascan) the banner "Looking for chapters…" stayed for minutes and looked like loading that never ends.
+      //   HOW: race the background reader against a 20 s timer; the reader itself keeps working and reading mode waits for it only when it needs the list. IMPROVE: show the page number it is on.
+      await Promise.race([page.enhancing, new Promise(r => setTimeout(r, 20000))]);
       // WHY: the person may have left. HOW: if cur is no longer this page, stop.
       if (cur !== page) return;                                           // the person went somewhere else
       // WHY: is this a chapter page? HOW: ok is true if 3 or more pictures are found, or the address has a chapter number and
@@ -4182,9 +4185,14 @@
         const c = gaps[k++]; if (R.gen !== gen) return;
         try {
           const { doc, base } = await fetchDoc(c.url);
+          // ROUND 57: a page that ANSWERS (HTTP 200) is kept even when no picture can be seen in its HTML. WHY: sites such as arenascan write the pictures with a script, so the old rule
+          //   ("no picture = chapter missing") wrongly threw real chapters out and the reader jumped from chapter 1 to chapter 20. HOW: only an honest "not found" removes a chapter:
+          //   HTTP 404/410 (below) or a page whose title says 404 / not found and that does not mention this chapter number.
           const sc = scanPictures(doc, base);
-          if (sc.list.length >= 1 || sc.holders >= 1 || looksLikeChapter(doc, base, c.url)) { c.verified = true; A.verified++; }
-          else { c.dead = true; A.dead.push(c.num + ' (page exists but has no pictures)'); }
+          const ttl = ((doc.title || '') + ' ' + ((doc.querySelector('h1') || {}).textContent || '')).toLowerCase();
+          const says404 = /\b404\b|not found|page (does ?n.t|does not) exist|no longer available/.test(ttl) && !new RegExp('(^|[^0-9])' + c.num + '([^0-9]|$)').test(ttl);
+          if (says404 && sc.list.length < 1) { c.dead = true; A.dead.push(c.num + ' (the site shows its "not found" page)'); }
+          else { c.verified = true; A.verified++; }
         } catch (e) {
           const msg = String((e && e.message) || e);
           if (/HTTP 404|HTTP 410|NOT FOUND/i.test(msg)) { c.dead = true; A.dead.push(c.num + ' (not on the site: ' + (msg.match(/HTTP 4\d\d/) || ['not found'])[0] + ')'); }
@@ -4230,6 +4238,14 @@
       : A.dead.length ? 'The site is missing ' + A.dead.length + ' chapter(s): ' + A.dead.slice(0, 8).map(x => x.split(' ')[0]).join(', ') + (A.dead.length > 8 ? ' …' : '')
       : 'Some chapters could not be checked: ' + A.unsure.slice(0, 8).map(x => x.split(' ')[0]).join(', ');
     showError(head, { title: '📚 Chapter check: ' + (A.notDetected.length ? 'not shown in reading mode' : A.dead.length ? 'missing on the site' : 'could not verify'), details: lines.join('\n'), hint: 'Open the original site and look at the chapter list. If the chapter is there, press Retry on its box or send this report.' });
+  }
+  // ROUND 57: what the site view (Page 2) knows about the chapter list - for the diagnostic report when "no chapter shows".
+  function pageListText() {
+    if (!cur) return 'no page open';
+    const L = cur.chapters || [];
+    let nums = ''; try { const n = L.map(c => chapterNumInUrl(c.url)).filter(x => x != null); if (n.length) nums = ', numbers ' + Math.min(...n) + ' to ' + Math.max(...n) + ' (' + new Set(n).size + ' different)'; } catch { /* ignore */ }
+    const busy = (document.getElementById('busy') || {}).hidden === false ? ', banner: "' + document.getElementById('busy').textContent + '"' : '';
+    return 'list ' + L.length + ' chapters' + nums + ', background reader ' + (cur.enhancingDone ? 'finished' : 'still working') + busy;
   }
   function chapterAuditText() {
     const A = R && R.audit; if (!A) return 'no audit yet';
@@ -7090,6 +7106,7 @@
     row(null, 'Site view pictures (round 51): ' + pageViewPicText());
     row(null, 'Chapter boxes (round 52): ' + chapterHealthText());
     row(null, 'Chapter audit (round 55): ' + chapterAuditText());
+    row(null, 'Site view chapter list (round 57): ' + pageListText());
     row(null, 'Memory: ' + heapText() + ' · PDF picture quality: ' + settings.pdfMode);
     return rows;
   }
@@ -7140,7 +7157,7 @@
       'Human check (round 29e): ' + (humanHosts.size ? [...humanHosts.keys()].join(', ') + ' waiting' : 'no site waiting'),
       'Search engine: ' + settings.searchEngine + ' (strict ' + !!settings.engineStrict + '), Google ID ' + (settings.googleCx || 'none') + ', last Google result: ' + (googleLast || 'no Google search yet') + ', blocked by page rules: ' + (Array.from(cspSeen).join(', ') || 'nothing'),
       'Profile: ' + (PF && PF.user() ? PF.user() + ' (' + PF.role() + ')' : 'not signed in') + ', sync: ' + (si && si.ok !== null ? (si.ok ? 'OK ' : 'FAILED ' + si.err + ' ') + new Date(si.t).toLocaleTimeString() : 'nothing sent yet'),
-      'Picture routes: ' + routeStatText(), 'Site view pictures (round 51): ' + pageViewPicText(), 'Chapter boxes (round 52): ' + chapterHealthText(), 'Chapter audit (round 55): ' + chapterAuditText(), 'Memory: ' + heapText(),
+      'Picture routes: ' + routeStatText(), 'Site view pictures (round 51): ' + pageViewPicText(), 'Chapter boxes (round 52): ' + chapterHealthText(), 'Chapter audit (round 55): ' + chapterAuditText(), 'Site view chapter list (round 57): ' + pageListText(), 'Memory: ' + heapText(),
       'Downloads: ' + (jobs.map(j => '#' + j.id + ' ' + j.status + ' ' + (j.pct || 0) + '% ' + (j.text || '')).join(' | ') || 'none'),
       extra || '',
       '--- last problems (newest last) ---', errLog.slice(-4).map(e => e.report).join('\n\n=====\n') || 'none',
